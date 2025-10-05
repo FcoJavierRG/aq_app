@@ -1,0 +1,1 @@
+pip freeze > requirements.txt            # option A: full env (big)
