@@ -1,1 +1,18 @@
-pip freeze > requirements.txt            # option A: full env (big)
+# Core libraries
+streamlit
+opencv-python
+networkx
+numpy
+matplotlib
+pandas
+scikit-image
+
+# Utility libraries
+Pillow
+tqdm
+
+# Optional (for better numerical and plotting support)
+scipy
+
+# To avoid version conflicts on Streamlit Cloud
+protobuf<5
