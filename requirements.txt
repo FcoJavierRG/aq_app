@@ -1,6 +1,6 @@
 # Core libraries
 streamlit
-opencv-python
+opencv-python-headless
 networkx
 numpy
 matplotlib
