@@ -10,4 +10,5 @@ Pillow
 tqdm
 scipy
 protobuf<5
+ipython
 
