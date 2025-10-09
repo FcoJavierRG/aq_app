@@ -64,31 +64,22 @@ if uploaded:
     # --- Build Routes Table ---
     rows = []
     for idx, r in enumerate(results["routes"]):
-        decision_points_str = ", ".join(f"{dp[0]}({dp[4]})" for dp in r["decision_points"])
+        decision_points_str = ", ".join(f"{dp[0]}" for dp in r["decision_points"])  # remove dp_type
         rows.append({
             "Route": r["route_id"] + 1,
             "P_MF": round(r["P_MF"], 4),
             "E_M": round(r["E_M"], 2),
             "Turns": r.get("turns", 0),
             "Length_px": int(r.get("length", 0)),
-            "DecisionPoints": decision_points_str,
-            "Color": colors[idx % len(colors)]
+            "DecisionPoints": decision_points_str
         })
 
     df = pd.DataFrame(rows)
 
     if not df.empty:
         st.subheader("Routes Table")
-
-        # Color entire row by route
-        def highlight_row(row):
-            color = row.Color
-            return [f'background-color: {color}; color: black' for _ in row.index]
-
-        st.dataframe(df.style.apply(highlight_row, axis=1))
-
-        # CSV download (without color column)
-        csv = df.drop(columns=["Color"]).to_csv(index=False)
+        st.dataframe(df)  # no color highlighting
+        csv = df.to_csv(index=False)
         st.download_button("Download Routes CSV", csv, "routes.csv", "text/csv")
     else:
         st.warning("No routes found. Adjust parameters.")
@@ -114,7 +105,7 @@ if uploaded:
         ax2.scatter([xs[0]], [ys[0]], marker="o", color="green", s=40, label="_nolegend_")
         ax2.scatter([xs[-1]], [ys[-1]], marker="x", color="red", s=40, label="_nolegend_")
 
-        # Plot decision points with labels
+        # Plot only turns (no junction N=...)
         for dp in r["decision_points"]:
             dp_name, N_ij, P_ij, E_ij, dp_type = dp
             if "turn" in dp_type:
@@ -123,11 +114,6 @@ if uploaded:
                 ax2.scatter([x], [y], marker="o", color=color, s=50, edgecolor="black", label="_nolegend_")
                 angle_str = dp_type.split("angle=")[-1].replace(")", "")
                 ax2.text(x, y, f"{angle_str}°", color="black", fontsize=7, ha="center", va="bottom")
-            elif dp_type == "junction":
-                node_idx = route.index(dp_name) if dp_name in route else 0
-                x, y = xs[node_idx], ys[node_idx]
-                ax2.scatter([x], [y], marker="s", color="black", s=60, label="_nolegend_")
-                ax2.text(x, y, f"N={N_ij}", color="white", fontsize=7, ha="center", va="center")
 
     ax2.axis("off")
     ax2.set_title("Skeleton and Detected Routes")
