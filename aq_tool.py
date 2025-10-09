@@ -222,47 +222,77 @@ def run_aq_pipeline(input_path:str, px_per_meter=50.0, outdir="out",
 # ================================================================
 # 6. AccessQuotient computation
 # ================================================================
-def _angle_between(a, b):
-    # a, b are 2D vectors
-    da = math.hypot(a[0], a[1])
-    db = math.hypot(b[0], b[1])
-    if da == 0 or db == 0:
+def _angle_between_vecs(v1, v2):
+    a = np.array(v1, dtype=float)
+    b = np.array(v2, dtype=float)
+    na = np.linalg.norm(a)
+    nb = np.linalg.norm(b)
+    if na == 0 or nb == 0:
         return 0.0
-    cosv = (a[0]*b[0] + a[1]*b[1]) / (da * db)
-    cosv = max(-1.0, min(1.0, cosv))
+    cosv = np.dot(a, b) / (na * nb)
+    cosv = float(np.clip(cosv, -1.0, 1.0))
     return math.degrees(math.acos(cosv))
+
+def _build_route_polyline(route, G):
+    """
+    Given a route (list of node ids) and graph G where edges contain 'path' as
+    a list of (y,x) pixel coordinates, build a single ordered list of (x,y)
+    coordinates for the whole route (no duplicates at joins).
+    Coordinates returned as floats (x,y).
+    """
+    poly = []
+    for i in range(len(route)-1):
+        u = route[i]
+        v = route[i+1]
+        data = G.get_edge_data(u, v)
+        if data is None:
+            # fallback: use node coordinates if edge data missing
+            xu, yu = G.nodes[u]["x"], G.nodes[u]["y"]
+            xv, yv = G.nodes[v]["x"], G.nodes[v]["y"]
+            segment = [(xu, yu), (xv, yv)]
+        else:
+            # stored path is list of (y,x) pixel coords in your code -> convert to (x,y)
+            seg = data.get("path", None)
+            if seg is None:
+                xu, yu = G.nodes[u]["x"], G.nodes[u]["y"]
+                xv, yv = G.nodes[v]["x"], G.nodes[v]["y"]
+                segment = [(xu, yu), (xv, yv)]
+            else:
+                # seg: list of (y,x) ints; convert to list of (x,y) floats
+                segment = [(float(xc), float(yc)) for (yc, xc) in seg]
+
+        if not poly:
+            poly.extend(segment)
+        else:
+            # avoid repeating the first point of this segment if it equals last of poly
+            if np.allclose(poly[-1], segment[0]):
+                poly.extend(segment[1:])
+            else:
+                poly.extend(segment)
+    # remove possible immediate duplicates
+    cleaned = [tuple(poly[0])]
+    for p in poly[1:]:
+        if not np.allclose(p, cleaned[-1]):
+            cleaned.append(tuple(p))
+    return cleaned
 
 def compute_access_quotient(G, routes, weights,
                             min_branch_len=10,
                             angle_thresh_deg=30.0,
                             min_turn_len_px=3):
     """
-    Compute AccessQuotient but:
-      - treat significant turns at degree-2 nodes as decision points (N_ij=2)
-      - filter out tiny branches (edge 'weight' < min_branch_len)
-    Parameters
-    ----------
-    G : networkx.Graph
-        Graph where edges have 'weight' (length)
-    routes : list[list]
-        List of routes (each route is a list of node IDs)
-    weights : list[float]
-        Weights for each route (sum==1)
-    min_branch_len : float
-        Minimum edge length to count a neighboring branch as valid
-    angle_thresh_deg : float
-        Minimum change-of-direction angle (in degrees) at a degree-2 node
-        to consider it a decision/turn.
-    min_turn_len_px : float
-        Minimum length in pixels of the incoming/outgoing segments for a turn to be valid.
-    Returns
-    -------
-    dict with AQ_S, AQ_F, routes details (P_MF, E_M, decision_points, turns_count)
+    Geometry-based AccessQuotient computation.
+    - Uses edge['path'] polylines to detect turns (not relying on deg==2 nodes).
+    - Also counts junctions (deg>=3) in the route nodes, filtering tiny branches.
     """
-    assert len(routes) == len(weights), "routes and weights must align"
-    assert abs(sum(weights) - 1.0) < 1e-6, "weights must sum to 1"
+    # basic checks
+    if len(routes) != len(weights):
+        raise AssertionError("routes and weights must align")
+    if abs(sum(weights) - 1.0) > 1e-6:
+        raise AssertionError("weights must sum to 1")
 
-    AQ_S, AQ_F = 0.0, 0.0
+    AQ_S = 0.0
+    AQ_F = 0.0
     route_results = []
 
     for r_idx, (route, w) in enumerate(zip(routes, weights)):
@@ -270,70 +300,64 @@ def compute_access_quotient(G, routes, weights,
         E_M = 0.0
         decision_points = []
         turns_count = 0
+        turn_points = []
 
-        # iterate internal nodes only (exclude start/end)
+        # 1) Count graph-node junctions along route (deg >= 3)
         for i in range(1, len(route)-1):
             node = route[i]
             deg = G.degree[node]
-
-            # first handle true junctions deg >= 3
             if deg >= 3:
-                # count only branches whose edge weight >= min_branch_len
+                # count only branches with length >= min_branch_len
                 valid_branches = 0
-                branch_neighbors = []
                 for nbr in G.neighbors(node):
-                    edge_len = G.edges[node, nbr].get("weight", 1.0)
-                    if edge_len >= min_branch_len:
+                    elen = G.edges[node, nbr].get("weight", 1.0)
+                    if elen >= min_branch_len:
                         valid_branches += 1
-                        branch_neighbors.append((nbr, edge_len))
-
-                # if <=1 valid branch then it's not really a branching point
                 if valid_branches >= 2:
                     N_ij = valid_branches
                     P_ij = 1.0 / N_ij
-                    # original formula: (N+1)/(K+1) - 1 , K=1
                     E_ij = (N_ij + 1) / 2.0 - 1.0
-
                     P_MF *= P_ij
                     E_M += E_ij
                     decision_points.append((node, N_ij, P_ij, E_ij, "junction"))
 
-            # now consider degree == 2 nodes that might be turns
-            elif deg == 2:
-                prev_node = route[i-1]
-                next_node = route[i+1]
+        # 2) Build full polyline for route (concatenate edge paths)
+        poly = _build_route_polyline(route, G)  # list of (x,y) tuples (floats)
+        if len(poly) >= 3:
+            # compute segment vectors and lengths
+            vecs = []
+            seg_lengths = []
+            for i in range(len(poly)-1):
+                x0,y0 = poly[i]
+                x1,y1 = poly[i+1]
+                v = (x1-x0, y1-y0)
+                L = math.hypot(v[0], v[1])
+                vecs.append(v)
+                seg_lengths.append(L)
 
-                # coordinates (x,y) stored in node attributes
-                x_prev, y_prev = (G.nodes[prev_node]["x"], G.nodes[prev_node]["y"])
-                x_curr, y_curr = (G.nodes[node]["x"], G.nodes[node]["y"])
-                x_next, y_next = (G.nodes[next_node]["x"], G.nodes[next_node]["y"])
-
-                # compute incoming/outgoing segment lengths
-                in_len = G.edges[prev_node, node].get("weight", 1.0) if G.has_edge(prev_node, node) else math.hypot(x_curr-x_prev, y_curr-y_prev)
-                out_len = G.edges[node, next_node].get("weight", 1.0) if G.has_edge(node, next_node) else math.hypot(x_next-x_curr, y_next-y_curr)
-
-                # if segments are too short, ignore (likely noise)
-                if in_len < min_turn_len_px or out_len < min_turn_len_px:
+            # compress tiny segments to avoid noise: merge segments with length < 1 px into neighbors
+            # (simple approach: skip segments with very small length when computing angles)
+            for i in range(1, len(vecs)):
+                L_prev = seg_lengths[i-1]
+                L_next = seg_lengths[i]
+                # compute angle between vecs[i-1] and vecs[i]
+                if L_prev < min_turn_len_px or L_next < min_turn_len_px:
                     continue
-
-                # compute angle between vectors prev->curr and curr->next
-                v1 = (x_curr - x_prev, y_curr - y_prev)
-                v2 = (x_next - x_curr, y_next - y_curr)
-                ang = _angle_between(v1, v2)
-
-                # if angle exceeds threshold, count as binary decision N_ij=2
+                ang = _angle_between_vecs(vecs[i-1], vecs[i])
                 if ang >= angle_thresh_deg:
+                    # found a turn
+                    turns_count += 1
+                    # turn coordinate approx at the joint point poly[i]
+                    turn_points.append(poly[i])
+                    # treat turn as binary decision (N_ij = 2)
                     N_ij = 2
                     P_ij = 1.0 / N_ij
-                    E_ij = (N_ij + 1) / 2.0 - 1.0  # equals 0.5
-
+                    E_ij = (N_ij + 1) / 2.0 - 1.0  # 0.5
                     P_MF *= P_ij
                     E_M += E_ij
-                    turns_count += 1
-                    decision_points.append((node, N_ij, P_ij, E_ij, f"turn(angle={round(ang,1)})"))
+                    decision_points.append((f"turn_{i}", N_ij, P_ij, E_ij, f"turn(angle={round(ang,1)})"))
 
-            # else deg == 1 or deg == 0 -> nothing to do
-
+        # finalize route contributions
         AQ_S += w * P_MF
         AQ_F += w * (1.0 / (1.0 + E_M))
 
@@ -343,6 +367,7 @@ def compute_access_quotient(G, routes, weights,
             "E_M": E_M,
             "decision_points": decision_points,
             "turns": turns_count,
+            "turn_points": turn_points,
             "length": len(route)
         })
 
@@ -494,5 +519,6 @@ def plot_routes_on_floorplan(input_path: str, G: nx.Graph, routes: list, skeleto
     plt.title("Extracted Routes on Floorplan")
     plt.axis("off")
     plt.show()
+
 
 
