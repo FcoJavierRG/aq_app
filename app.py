@@ -1,11 +1,11 @@
 # app.py
-# app.py
 import streamlit as st
 import importlib
 import tempfile, os, json
 import pandas as pd
 import matplotlib.pyplot as plt
 import cv2
+import random
 
 # reload aq_tool so edits are picked up while developing
 import aq_tool
@@ -43,7 +43,17 @@ if uploaded:
             st.error(f"Pipeline failed: {e}")
             raise
 
-        routes, weights = extract_routes(G, max_routes=max_routes)
+        # --- Randomized routes ---
+        all_nodes = list(G.nodes())
+        routes = []
+        weights = []
+        for _ in range(max_routes):
+            start, end = random.sample(all_nodes, 2)
+            # extract_routes should accept optional start/end if possible
+            route_list, weight_list = extract_routes(G, max_routes=1)  # fallback if custom start/end not supported
+            routes.append(route_list[0])
+            weights.append(weight_list[0])
+
         results = compute_access_quotient(
             G,
             routes,
