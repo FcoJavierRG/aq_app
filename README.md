@@ -5,7 +5,7 @@
 This project implements an **automatic floor plan analysis tool** that computes the **Access Quotient (AQ)** of a building layout from a floor plan image.  
 The tool extracts walkable routes, identifies junctions and turns, and quantifies the **navigational complexity and accessibility** of the layout.
 
-It can be used as a **Jupyter Notebook**, a **standalone Python module**, or as a **web application** powered by [Streamlite](https://https://streamlit.io//).
+It can be used as a **Jupyter Notebook**, a **standalone Python module**, or as a **web application** powered by [Streamlite](https://streamlit.io/).
 
 ---
 
