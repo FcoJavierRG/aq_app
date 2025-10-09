@@ -222,6 +222,13 @@ def run_aq_pipeline(input_path:str, px_per_meter=50.0, outdir="out",
 # ================================================================
 # 6. AccessQuotient computation
 # ================================================================
+import math
+import numpy as np
+
+# ===============================
+# Helper functions
+# ===============================
+
 def _angle_between_vecs(v1, v2):
     a = np.array(v1, dtype=float)
     b = np.array(v2, dtype=float)
@@ -233,59 +240,41 @@ def _angle_between_vecs(v1, v2):
     cosv = float(np.clip(cosv, -1.0, 1.0))
     return math.degrees(math.acos(cosv))
 
+
 def _build_route_polyline(route, G):
-    """
-    Given a route (list of node ids) and graph G where edges contain 'path' as
-    a list of (y,x) pixel coordinates, build a single ordered list of (x,y)
-    coordinates for the whole route (no duplicates at joins).
-    Coordinates returned as floats (x,y).
-    """
     poly = []
     for i in range(len(route)-1):
-        u = route[i]
-        v = route[i+1]
+        u, v = route[i], route[i+1]
         data = G.get_edge_data(u, v)
-        if data is None:
-            # fallback: use node coordinates if edge data missing
+        if data is None or data.get("path") is None:
             xu, yu = G.nodes[u]["x"], G.nodes[u]["y"]
             xv, yv = G.nodes[v]["x"], G.nodes[v]["y"]
             segment = [(xu, yu), (xv, yv)]
         else:
-            # stored path is list of (y,x) pixel coords in your code -> convert to (x,y)
-            seg = data.get("path", None)
-            if seg is None:
-                xu, yu = G.nodes[u]["x"], G.nodes[u]["y"]
-                xv, yv = G.nodes[v]["x"], G.nodes[v]["y"]
-                segment = [(xu, yu), (xv, yv)]
-            else:
-                # seg: list of (y,x) ints; convert to list of (x,y) floats
-                segment = [(float(xc), float(yc)) for (yc, xc) in seg]
-
+            seg = data["path"]
+            segment = [(float(xc), float(yc)) for (yc, xc) in seg]
         if not poly:
             poly.extend(segment)
         else:
-            # avoid repeating the first point of this segment if it equals last of poly
             if np.allclose(poly[-1], segment[0]):
                 poly.extend(segment[1:])
             else:
                 poly.extend(segment)
-    # remove possible immediate duplicates
     cleaned = [tuple(poly[0])]
     for p in poly[1:]:
         if not np.allclose(p, cleaned[-1]):
             cleaned.append(tuple(p))
     return cleaned
 
+
+# ===============================
+# Main function
+# ===============================
+
 def compute_access_quotient(G, routes, weights,
                             min_branch_len=10,
-                            angle_thresh_deg=30.0,
-                            min_turn_len_px=3):
-    """
-    Geometry-based AccessQuotient computation.
-    - Uses edge['path'] polylines to detect turns (not relying on deg==2 nodes).
-    - Also counts junctions (deg>=3) in the route nodes, filtering tiny branches.
-    """
-    # basic checks
+                            angle_thresh_deg=15.0,   # lower default for testing
+                            min_turn_len_px=1.0):    # lower default for testing
     if len(routes) != len(weights):
         raise AssertionError("routes and weights must align")
     if abs(sum(weights) - 1.0) > 1e-6:
@@ -302,17 +291,17 @@ def compute_access_quotient(G, routes, weights,
         turns_count = 0
         turn_points = []
 
-        # 1) Count graph-node junctions along route (deg >= 3)
+        # -------------------
+        # Junctions (deg>=3)
+        # -------------------
         for i in range(1, len(route)-1):
             node = route[i]
             deg = G.degree[node]
             if deg >= 3:
-                # count only branches with length >= min_branch_len
-                valid_branches = 0
-                for nbr in G.neighbors(node):
-                    elen = G.edges[node, nbr].get("weight", 1.0)
-                    if elen >= min_branch_len:
-                        valid_branches += 1
+                valid_branches = sum(
+                    1 for nbr in G.neighbors(node)
+                    if G.edges[node, nbr].get("weight", 1.0) >= min_branch_len
+                )
                 if valid_branches >= 2:
                     N_ij = valid_branches
                     P_ij = 1.0 / N_ij
@@ -321,43 +310,60 @@ def compute_access_quotient(G, routes, weights,
                     E_M += E_ij
                     decision_points.append((node, N_ij, P_ij, E_ij, "junction"))
 
-        # 2) Build full polyline for route (concatenate edge paths)
-        poly = _build_route_polyline(route, G)  # list of (x,y) tuples (floats)
+        # -------------------
+        # Turns along polyline
+        # -------------------
+        poly = _build_route_polyline(route, G)
         if len(poly) >= 3:
-            # compute segment vectors and lengths
             vecs = []
             seg_lengths = []
             for i in range(len(poly)-1):
-                x0,y0 = poly[i]
-                x1,y1 = poly[i+1]
-                v = (x1-x0, y1-y0)
+                x0, y0 = poly[i]
+                x1, y1 = poly[i+1]
+                v = (x1 - x0, y1 - y0)
                 L = math.hypot(v[0], v[1])
                 vecs.append(v)
                 seg_lengths.append(L)
 
-            # compress tiny segments to avoid noise: merge segments with length < 1 px into neighbors
-            # (simple approach: skip segments with very small length when computing angles)
-            for i in range(1, len(vecs)):
-                L_prev = seg_lengths[i-1]
-                L_next = seg_lengths[i]
-                # compute angle between vecs[i-1] and vecs[i]
-                if L_prev < min_turn_len_px or L_next < min_turn_len_px:
-                    continue
-                ang = _angle_between_vecs(vecs[i-1], vecs[i])
+            # merge tiny segments into neighbors
+            merged_vecs = []
+            merged_lengths = []
+            i = 0
+            while i < len(vecs):
+                v_total = vecs[i]
+                L_total = seg_lengths[i]
+                j = i + 1
+                while j < len(vecs) and seg_lengths[j] < min_turn_len_px:
+                    v_next = vecs[j]
+                    L_next = seg_lengths[j]
+                    v_total = (v_total[0] + v_next[0], v_total[1] + v_next[1])
+                    L_total += L_next
+                    j += 1
+                merged_vecs.append(v_total)
+                merged_lengths.append(L_total)
+                i = j
+
+            # detect turns
+            for i in range(1, len(merged_vecs)):
+                ang = _angle_between_vecs(merged_vecs[i-1], merged_vecs[i])
+                # print(f"i={i}, angle={ang:.2f}")  # debug
                 if ang >= angle_thresh_deg:
-                    # found a turn
                     turns_count += 1
-                    # turn coordinate approx at the joint point poly[i]
-                    turn_points.append(poly[i])
-                    # treat turn as binary decision (N_ij = 2)
+                    # approximate turn location in original polyline
+                    idx = sum(int(l >= min_turn_len_px) for l in seg_lengths[:i])
+                    turn_points.append(poly[idx])
                     N_ij = 2
                     P_ij = 1.0 / N_ij
-                    E_ij = (N_ij + 1) / 2.0 - 1.0  # 0.5
+                    E_ij = (N_ij + 1) / 2.0 - 1.0
                     P_MF *= P_ij
                     E_M += E_ij
-                    decision_points.append((f"turn_{i}", N_ij, P_ij, E_ij, f"turn(angle={round(ang,1)})"))
+                    decision_points.append(
+                        (f"turn_{idx}", N_ij, P_ij, E_ij, f"turn(angle={round(ang,1)})")
+                    )
 
-        # finalize route contributions
+        # -------------------
+        # Aggregate route
+        # -------------------
         AQ_S += w * P_MF
         AQ_F += w * (1.0 / (1.0 + E_M))
 
@@ -376,6 +382,7 @@ def compute_access_quotient(G, routes, weights,
         "AQ_F": AQ_F,
         "routes": route_results
     }
+
 
 # ================================================================
 # 7. Faster route extraction (no all-pairs)
@@ -519,6 +526,7 @@ def plot_routes_on_floorplan(input_path: str, G: nx.Graph, routes: list, skeleto
     plt.title("Extracted Routes on Floorplan")
     plt.axis("off")
     plt.show()
+
 
 
 
