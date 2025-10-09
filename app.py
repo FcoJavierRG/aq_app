@@ -23,7 +23,7 @@ min_branch_len = st.sidebar.slider("min_branch_len (px)", min_value=1, max_value
 angle_thresh_deg = st.sidebar.slider("angle_thresh_deg", min_value=5, max_value=90, value=30)
 min_turn_len_px = st.sidebar.slider("min_turn_len_px", min_value=1, max_value=20, value=3)
 
-uploaded = st.file_uploader("Upload floorplan (png, jpg, pdf)", type=["png","jpg","jpeg","pdf"])
+uploaded = st.file_uploader("Upload floorplan (png, jpg, pdf)", type=["png", "jpg", "jpeg", "pdf"])
 
 if uploaded:
     # Save upload to temporary file
@@ -47,18 +47,21 @@ if uploaded:
         routes, weights = extract_routes(G, max_routes=max_routes)
 
         # Compute AQ with the improved function that detects turns
-        results = compute_access_quotient(G, routes, weights,
-                                         min_branch_len=min_branch_len,
-                                         angle_thresh_deg=angle_thresh_deg,
-                                         min_turn_len_px=min_turn_len_px)
+        results = compute_access_quotient(
+            G,
+            routes,
+            weights,
+            min_branch_len=min_branch_len,
+            angle_thresh_deg=angle_thresh_deg,
+            min_turn_len_px=min_turn_len_px
+        )
 
     # --- Display summary metrics ---
     st.subheader("Summary Metrics")
-    col1, col2 = st.columns([1,2])
+    col1, col2 = st.columns([1, 2])
     with col1:
         st.json({"AQ_S": results["AQ_S"], "AQ_F": results["AQ_F"], "num_routes": len(routes)})
     with col2:
-        # show raw metrics from pipeline
         st.write("Pipeline-level metrics (skeleton/graph):")
         st.json(metrics)
 
@@ -66,7 +69,7 @@ if uploaded:
     rows = []
     for r in results["routes"]:
         rows.append({
-            "Route": r["route_id"]+1,
+            "Route": r["route_id"] + 1,
             "P_MF": round(r["P_MF"], 4),
             "E_M": round(r["E_M"], 2),
             "Turns": r.get("turns", 0),
@@ -74,52 +77,52 @@ if uploaded:
         })
     df = pd.DataFrame(rows)
     if not df.empty:
-        st.subheader("Routes table")
+        st.subheader("Routes Table")
         st.dataframe(df)
 
         # CSV download
         csv = df.to_csv(index=False)
-        st.download_button("Download routes CSV", csv, "routes.csv", "text/csv")
+        st.download_button("Download Routes CSV", csv, "routes.csv", "text/csv")
 
     else:
         st.warning("No routes found. Try adjusting parameters (reduce min_branch_len or increase max_routes).")
 
-    # --- Plot original image + routes overlay ---
+    # --- Visualization Section ---
     st.subheader("Visualization")
-    # load original for background if raster (if pdf, skip background)
-    try:
-        if suffix.lower() == ".pdf":
-            # use skeleton only when pdf
-            img = None
-        else:
-            img_bgr = cv2.imread(fpath, cv2.IMREAD_COLOR)
-            if img_bgr is not None:
-                img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-            else:
-                img = None
-    except Exception:
-        img = None
 
-    fig, ax = plt.subplots(figsize=(8,8))
-    if img is not None:
-        ax.imshow(img, alpha=0.8)
-    # if skeleton exists, show it as background
+    # Load original image
+    img = None
+    if suffix.lower() != ".pdf":
+        img_bgr = cv2.imread(fpath, cv2.IMREAD_COLOR)
+        if img_bgr is not None:
+            img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+
+    # Prepare skeleton + routes figure
+    fig2, ax2 = plt.subplots(figsize=(6, 6))
     if skel is not None:
-        ax.imshow(skel, cmap="gray", alpha=0.6)
+        ax2.imshow(skel, cmap="gray", alpha=1.0)
 
-    colors = ["cyan","lime","orange","magenta","brown","yellow","red","blue","purple","teal"]
+    colors = ["cyan", "lime", "orange", "magenta", "brown", "yellow", "red", "blue", "purple", "teal"]
     for idx, route in enumerate(routes):
         xs = [G.nodes[n]["x"] for n in route]
         ys = [G.nodes[n]["y"] for n in route]
-        ax.plot(xs, ys, color=colors[idx%len(colors)], linewidth=2, label=f"Route {idx+1}")
-        ax.scatter([xs[0]],[ys[0]], marker="o", color="green", s=40)   # start
-        ax.scatter([xs[-1]],[ys[-1]], marker="x", color="red", s=40)  # end
-    ax.axis("off")
-    ax.set_title("Routes overlay (skeleton in background)")
+        ax2.plot(xs, ys, color=colors[idx % len(colors)], linewidth=2, label=f"Route {idx + 1}")
+        ax2.scatter([xs[0]], [ys[0]], marker="o", color="green", s=40)   # start
+        ax2.scatter([xs[-1]], [ys[-1]], marker="x", color="red", s=40)   # end
+    ax2.axis("off")
+    ax2.set_title("Skeleton and Detected Routes")
 
-    st.pyplot(fig)
+    # Display both side-by-side
+    col1, col2 = st.columns(2)
+    with col1:
+        if img is not None:
+            st.image(img, caption="Original Floor Plan", use_container_width=True)
+        else:
+            st.info("PDF detected – no raster image to show.")
+    with col2:
+        st.pyplot(fig2, use_container_width=True)
 
-    # Save outputs (optional)
+    # --- Save outputs ---
     out_json = json.dumps(results, indent=2)
     st.download_button("Download AQ JSON", out_json, "aq_results.json", "application/json")
 
