@@ -5,7 +5,6 @@ import tempfile, os, json
 import pandas as pd
 import matplotlib.pyplot as plt
 import cv2
-import random
 
 # reload aq_tool so edits are picked up while developing
 import aq_tool
@@ -43,24 +42,7 @@ if uploaded:
             st.error(f"Pipeline failed: {e}")
             raise
 
-        # --- Randomized routes ---
-        all_nodes = list(G.nodes())
-        routes = []
-        weights = []
-        for _ in range(max_routes):
-            start, end = random.sample(all_nodes, 2)
-            # Use extract_routes logic (fallback if custom start/end not supported)
-            route_list, weight_list = extract_routes(G, max_routes=1)
-            routes.append(route_list[0])
-            weights.append(weight_list[0])
-
-        # --- Normalize weights to sum to 1 ---
-        total_weight = sum(weights)
-        if total_weight == 0:
-            weights = [1.0 / len(weights)] * len(weights)
-        else:
-            weights = [w / total_weight for w in weights]
-
+        routes, weights = extract_routes(G, max_routes=max_routes)
         results = compute_access_quotient(
             G,
             routes,
