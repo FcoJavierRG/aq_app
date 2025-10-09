@@ -1,6 +1,6 @@
 # aq_app
 
-# 🏗️ Floor Plan Accessibility Analyzer (Access Quotient Tool)
+# Floor Plan Accessibility Analyzer (Access Quotient Tool)
 
 This project implements an **automatic floor plan analysis tool** that computes the **Access Quotient (AQ)** of a building layout from a floor plan image.  
 The tool extracts walkable routes, identifies junctions and turns, and quantifies the **navigational complexity and accessibility** of the layout.
@@ -9,7 +9,7 @@ It can be used as a **Jupyter Notebook**, a **standalone Python module**, or as 
 
 ---
 
-## 🚀 Features
+## Features
 
 - Automatically extracts walkable paths from a floor plan (PDF/PNG).
 - Detects **branches**, **junctions**, and **turns** using graph analysis.
@@ -26,7 +26,7 @@ It can be used as a **Jupyter Notebook**, a **standalone Python module**, or as 
 
 ---
 
-## 🧩 System Requirements
+## System Requirements
 
 - Python 3.9 or newer
 - [Anaconda](https://www.anaconda.com/) (recommended)
