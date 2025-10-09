@@ -22,7 +22,7 @@ It can be used as a **Jupyter Notebook**, a **standalone Python module**, or as 
   - `E_M`: Decision complexity  
   - Route length
 - Works directly from images (e.g., floorplan.png).
-- Ready for web deployment via **Voila** or **Binder**.
+- Ready for web deployment via **Streamlite**.
 
 ---
 
