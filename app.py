@@ -49,10 +49,17 @@ if uploaded:
         weights = []
         for _ in range(max_routes):
             start, end = random.sample(all_nodes, 2)
-            # extract_routes should accept optional start/end if possible
-            route_list, weight_list = extract_routes(G, max_routes=1)  # fallback if custom start/end not supported
+            # Use extract_routes logic (fallback if custom start/end not supported)
+            route_list, weight_list = extract_routes(G, max_routes=1)
             routes.append(route_list[0])
             weights.append(weight_list[0])
+
+        # --- Normalize weights to sum to 1 ---
+        total_weight = sum(weights)
+        if total_weight == 0:
+            weights = [1.0 / len(weights)] * len(weights)
+        else:
+            weights = [w / total_weight for w in weights]
 
         results = compute_access_quotient(
             G,
