@@ -1,4 +1,5 @@
 # app.py
+# app.py
 import streamlit as st
 import importlib
 import tempfile, os, json
@@ -12,7 +13,6 @@ importlib.reload(aq_tool)
 from aq_tool import run_aq_pipeline, extract_routes, compute_access_quotient
 
 st.set_page_config(layout="wide", page_title="Floorplan AQ Tool")
-
 st.title("Floorplan Accessibility (AccessQuotient) Tool")
 
 # Sidebar parameters
@@ -25,8 +25,9 @@ min_turn_len_px = st.sidebar.slider("min_turn_len_px", min_value=1, max_value=20
 
 uploaded = st.file_uploader("Upload floorplan (png, jpg, pdf)", type=["png", "jpg", "jpeg", "pdf"])
 
+colors = ["cyan", "lime", "orange", "magenta", "brown", "yellow", "red", "blue", "purple", "teal"]
+
 if uploaded:
-    # Save upload to temporary file
     suffix = os.path.splitext(uploaded.name)[1]
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
     tmp.write(uploaded.getvalue())
@@ -37,16 +38,12 @@ if uploaded:
     st.info("Running pipeline — this may take several seconds for large images.")
     with st.spinner("Processing..."):
         try:
-            # Run pipeline (returns metrics, graph, skeleton)
             metrics, G, skel = run_aq_pipeline(fpath, px_per_meter=px_per_meter, return_skeleton=True)
         except Exception as e:
             st.error(f"Pipeline failed: {e}")
             raise
 
-        # Extract routes
         routes, weights = extract_routes(G, max_routes=max_routes)
-
-        # Compute AQ with the improved function that detects turns
         results = compute_access_quotient(
             G,
             routes,
@@ -56,7 +53,7 @@ if uploaded:
             min_turn_len_px=min_turn_len_px
         )
 
-    # --- Display summary metrics ---
+    # --- Summary Metrics ---
     st.subheader("Summary Metrics")
     col1, col2 = st.columns([1, 2])
     with col1:
@@ -65,54 +62,78 @@ if uploaded:
         st.write("Pipeline-level metrics (skeleton/graph):")
         st.json(metrics)
 
-    # --- Build routes DataFrame ---
+    # --- Build Routes Table ---
     rows = []
-    for r in results["routes"]:
+    for idx, r in enumerate(results["routes"]):
+        decision_points_str = ", ".join(f"{dp[0]}({dp[4]})" for dp in r["decision_points"])
         rows.append({
             "Route": r["route_id"] + 1,
             "P_MF": round(r["P_MF"], 4),
             "E_M": round(r["E_M"], 2),
             "Turns": r.get("turns", 0),
-            "Length_px": int(r.get("length", 0))
+            "Length_px": int(r.get("length", 0)),
+            "DecisionPoints": decision_points_str,
+            "Color": colors[idx % len(colors)]
         })
+
     df = pd.DataFrame(rows)
+
     if not df.empty:
         st.subheader("Routes Table")
-        st.dataframe(df)
 
-        # CSV download
-        csv = df.to_csv(index=False)
+        # Color entire row by route
+        def highlight_row(row):
+            color = row.Color
+            return [f'background-color: {color}; color: black' for _ in row.index]
+
+        st.dataframe(df.style.apply(highlight_row, axis=1))
+
+        # CSV download (without color column)
+        csv = df.drop(columns=["Color"]).to_csv(index=False)
         st.download_button("Download Routes CSV", csv, "routes.csv", "text/csv")
-
     else:
-        st.warning("No routes found. Try adjusting parameters (reduce min_branch_len or increase max_routes).")
+        st.warning("No routes found. Adjust parameters.")
 
-    # --- Visualization Section ---
+    # --- Visualization ---
     st.subheader("Visualization")
-
-    # Load original image
     img = None
     if suffix.lower() != ".pdf":
         img_bgr = cv2.imread(fpath, cv2.IMREAD_COLOR)
         if img_bgr is not None:
             img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
 
-    # Prepare skeleton + routes figure
     fig2, ax2 = plt.subplots(figsize=(6, 6))
     if skel is not None:
         ax2.imshow(skel, cmap="gray", alpha=1.0)
 
-    colors = ["cyan", "lime", "orange", "magenta", "brown", "yellow", "red", "blue", "purple", "teal"]
-    for idx, route in enumerate(routes):
+    for idx, r in enumerate(results["routes"]):
+        route = routes[idx]
+        color = colors[idx % len(colors)]
         xs = [G.nodes[n]["x"] for n in route]
         ys = [G.nodes[n]["y"] for n in route]
-        ax2.plot(xs, ys, color=colors[idx % len(colors)], linewidth=2, label=f"Route {idx + 1}")
-        ax2.scatter([xs[0]], [ys[0]], marker="o", color="green", s=40)   # start
-        ax2.scatter([xs[-1]], [ys[-1]], marker="x", color="red", s=40)   # end
+        ax2.plot(xs, ys, color=color, linewidth=2, label=f"Route {idx+1}")
+        ax2.scatter([xs[0]], [ys[0]], marker="o", color="green", s=40, label="_nolegend_")
+        ax2.scatter([xs[-1]], [ys[-1]], marker="x", color="red", s=40, label="_nolegend_")
+
+        # Plot decision points with labels
+        for dp in r["decision_points"]:
+            dp_name, N_ij, P_ij, E_ij, dp_type = dp
+            if "turn" in dp_type:
+                tp_idx = int(dp_name.split("_")[1])
+                x, y = r["turn_points"][tp_idx] if tp_idx < len(r["turn_points"]) else (xs[tp_idx], ys[tp_idx])
+                ax2.scatter([x], [y], marker="o", color=color, s=50, edgecolor="black", label="_nolegend_")
+                angle_str = dp_type.split("angle=")[-1].replace(")", "")
+                ax2.text(x, y, f"{angle_str}°", color="black", fontsize=7, ha="center", va="bottom")
+            elif dp_type == "junction":
+                node_idx = route.index(dp_name) if dp_name in route else 0
+                x, y = xs[node_idx], ys[node_idx]
+                ax2.scatter([x], [y], marker="s", color="black", s=60, label="_nolegend_")
+                ax2.text(x, y, f"N={N_ij}", color="white", fontsize=7, ha="center", va="center")
+
     ax2.axis("off")
     ax2.set_title("Skeleton and Detected Routes")
+    ax2.legend(loc="upper right", fontsize=8)
 
-    # Display both side-by-side
     col1, col2 = st.columns(2)
     with col1:
         if img is not None:
@@ -126,11 +147,10 @@ if uploaded:
     out_json = json.dumps(results, indent=2)
     st.download_button("Download AQ JSON", out_json, "aq_results.json", "application/json")
 
-    # Clean up temp file
     try:
         os.remove(fpath)
     except Exception:
         pass
 
 else:
-    st.info("Upload a floorplan to begin. If you are editing aq_tool.py, re-run this app to pick up changes.")
+    st.info("Upload a floorplan to begin. Adjust parameters or re-run app if editing aq_tool.py.")
