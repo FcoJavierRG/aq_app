@@ -17,9 +17,18 @@ import math
 # Utility: Basic image loading
 # =============================
 def load_image_as_gray(path):
+    """Load image from any format and safely convert to grayscale."""
     img = io.imread(path)
     if img.ndim == 3:
+        # Handle RGBA by dropping alpha channel if present
+        if img.shape[2] == 4:
+            img = img[:, :, :3]
         img = color.rgb2gray(img)
+    elif img.ndim == 2:
+        # Already grayscale
+        pass
+    else:
+        raise ValueError(f"Unsupported image shape: {img.shape}")
     img = (img * 255).astype(np.uint8)
     return img
 
@@ -37,11 +46,10 @@ def run_aq_pipeline(
     binary = img < thresh  # invert if needed
     skel = skeletonize(binary)
 
-    # Label connected components (walkable areas)
-    labels = measure.label(skel)
+    # Extract skeleton coordinates
     coords = np.column_stack(np.nonzero(skel))
 
-    # Build graph
+    # Build simple graph
     G = nx.Graph()
     for (y, x) in coords:
         G.add_node((x, y), x=float(x), y=float(y))
@@ -68,6 +76,7 @@ def run_aq_pipeline(
 # Route Extraction
 # =============================
 def extract_routes(G, max_routes=5):
+    """Extracts a few representative routes based on distance."""
     if G.number_of_nodes() == 0:
         return [], []
 
@@ -75,33 +84,31 @@ def extract_routes(G, max_routes=5):
     if len(nodes) < 2:
         return [], []
 
-    # Find longest shortest path (diameter approximation)
-    routes = []
-    weights = []
-    paths = []
-
-    # Approx: use top-degree nodes as candidates
+    # Use top-degree nodes as candidates for route endpoints
     deg_sorted = sorted(G.degree, key=lambda x: x[1], reverse=True)
     end_nodes = [deg_sorted[i][0] for i in range(min(len(deg_sorted), 10))]
 
+    routes = []
+    weights = []
+
     for i, src in enumerate(end_nodes):
-        for dst in end_nodes[i+1:]:
+        for dst in end_nodes[i + 1:]:
             try:
                 path = nx.shortest_path(G, src, dst, weight="weight")
                 length = nx.path_weight(G, path, "weight")
                 routes.append(path)
                 weights.append(length)
-                paths.append((src, dst, length))
             except nx.NetworkXNoPath:
                 continue
 
-    if len(routes) == 0:
+    if not routes:
         return [], []
 
-    # Sort by length descending
+    # Sort routes by length
     idx = np.argsort(weights)[::-1][:max_routes]
     routes = [routes[i] for i in idx]
     weights = [weights[i] for i in idx]
+
     return routes, weights
 
 
@@ -110,8 +117,8 @@ def extract_routes(G, max_routes=5):
 # =============================
 def angle_between(p1, p2, p3):
     """Return angle (degrees) formed at p2 by p1–p2–p3."""
-    v1 = np.array([p1[0]-p2[0], p1[1]-p2[1]])
-    v2 = np.array([p3[0]-p2[0], p3[1]-p2[1]])
+    v1 = np.array([p1[0] - p2[0], p1[1] - p2[1]])
+    v2 = np.array([p3[0] - p2[0], p3[1] - p2[1]])
     if np.linalg.norm(v1) == 0 or np.linalg.norm(v2) == 0:
         return 0
     cos_ang = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
@@ -128,12 +135,13 @@ def compute_access_quotient(
     angle_thresh_deg=30,
     min_turn_len_px=3
 ):
+    """Compute simplified Access Quotient metrics."""
     if len(routes) == 0:
         return {"AQ_S": 0, "AQ_F": 0, "routes": []}
 
     routes_data = []
-    total_E_M = 0
-    total_P_MF = 0
+    total_P_MF = []
+    total_E_M = []
 
     for ridx, route in enumerate(routes):
         route_points = [(G.nodes[n]["x"], G.nodes[n]["y"]) for n in route]
@@ -141,25 +149,25 @@ def compute_access_quotient(
         decision_points = []
         turn_points = []
 
-        for i in range(1, len(route_points)-1):
-            ang = angle_between(route_points[i-1], route_points[i], route_points[i+1])
+        for i in range(1, len(route_points) - 1):
+            ang = angle_between(route_points[i - 1], route_points[i], route_points[i + 1])
             if ang > angle_thresh_deg:
                 turns += 1
                 decision_points.append((f"turn_{i}", None, None, None, f"turn(angle={int(ang)})"))
                 turn_points.append(route_points[i])
 
         length_px = sum(
-            np.hypot(route_points[i+1][0]-route_points[i][0],
-                     route_points[i+1][1]-route_points[i][1])
-            for i in range(len(route_points)-1)
+            np.hypot(route_points[i + 1][0] - route_points[i][0],
+                     route_points[i + 1][1] - route_points[i][1])
+            for i in range(len(route_points) - 1)
         )
 
-        # Placeholder probabilities
+        # Simple accessibility model
         P_MF = 1 / (1 + turns)
         E_M = length_px / (1 + turns)
 
-        total_P_MF += P_MF
-        total_E_M += E_M
+        total_P_MF.append(P_MF)
+        total_E_M.append(E_M)
 
         routes_data.append({
             "route_id": ridx,
@@ -171,8 +179,8 @@ def compute_access_quotient(
             "turn_points": turn_points,
         })
 
-    AQ_S = np.mean([r["P_MF"] for r in routes_data])
-    AQ_F = np.mean([r["E_M"] for r in routes_data])
+    AQ_S = np.mean(total_P_MF)
+    AQ_F = np.mean(total_E_M)
 
     return {"AQ_S": AQ_S, "AQ_F": AQ_F, "routes": routes_data}
 
@@ -181,7 +189,10 @@ def compute_access_quotient(
 # Multi-floor Linking
 # =============================
 def link_floors(graphs):
-    """Combine floor graphs into one, connecting nearest entry/exit nodes."""
+    """Combine multiple floor graphs into a single multi-level network."""
+    if not graphs:
+        return nx.Graph()
+
     G_total = nx.Graph()
     offset_y = 0
     connectors = []
@@ -191,22 +202,23 @@ def link_floors(graphs):
         for n in G.nodes:
             x = G.nodes[n]["x"]
             y = G.nodes[n]["y"] + offset_y
-            mapping[n] = (x, y, i)  # add floor index
+            mapping[n] = (x, y, i)
         G_floor = nx.relabel_nodes(G, mapping)
         G_total = nx.compose(G_total, G_floor)
 
-        # record midpoints to connect between floors
+        # Choose sample nodes to act as connectors
         nodes_arr = np.array([(G_floor.nodes[n]["x"], G_floor.nodes[n]["y"]) for n in G_floor.nodes])
-        mid_idx = np.random.choice(range(len(nodes_arr)), size=min(5, len(nodes_arr)), replace=False)
-        for mi in mid_idx:
-            connectors.append((nodes_arr[mi][0], nodes_arr[mi][1], i))
-        offset_y += 2000  # spacing between floor layouts
+        if len(nodes_arr) > 0:
+            mid_idx = np.random.choice(range(len(nodes_arr)), size=min(5, len(nodes_arr)), replace=False)
+            for mi in mid_idx:
+                connectors.append((nodes_arr[mi][0], nodes_arr[mi][1], i))
+        offset_y += 2000  # space floors vertically
 
-    # connect vertically nearest nodes
-    for i in range(len(connectors)-1):
-        if connectors[i][2] != connectors[i+1][2]:
+    # Connect nearest nodes between consecutive floors
+    for i in range(len(connectors) - 1):
+        if connectors[i][2] != connectors[i + 1][2]:
             n1 = (connectors[i][0], connectors[i][1], connectors[i][2])
-            n2 = (connectors[i+1][0], connectors[i+1][1], connectors[i+1][2])
+            n2 = (connectors[i + 1][0], connectors[i + 1][1], connectors[i + 1][2])
             if n1 in G_total.nodes and n2 in G_total.nodes:
                 G_total.add_edge(n1, n2, weight=100)
 
@@ -217,6 +229,7 @@ def link_floors(graphs):
 # Visualization
 # =============================
 def draw_routes_on_image(G, routes, skel, img_rgb=None):
+    """Draw extracted routes over the skeleton or original image."""
     fig, ax = plt.subplots(figsize=(6, 6))
     if img_rgb is not None:
         ax.imshow(img_rgb, alpha=0.6)
@@ -228,7 +241,7 @@ def draw_routes_on_image(G, routes, skel, img_rgb=None):
         color = colors[idx % len(colors)]
         xs = [G.nodes[n]["x"] for n in route]
         ys = [G.nodes[n]["y"] for n in route]
-        ax.plot(xs, ys, color=color, linewidth=2, label=f"Route {idx+1}")
+        ax.plot(xs, ys, color=color, linewidth=2, label=f"Route {idx + 1}")
         ax.scatter(xs[0], ys[0], color="green", marker="o", s=40)
         ax.scatter(xs[-1], ys[-1], color="red", marker="x", s=40)
 
