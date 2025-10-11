@@ -1,40 +1,29 @@
 # pages/2_Results_and_Visualization.py
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
 
 st.title("Results and Visualization")
 
-if "results" not in st.session_state:
-    st.warning("No analysis found. Please upload floorplans first.")
-    st.stop()
+if "floors" not in st.session_state or not st.session_state["floors"]:
+    st.warning("No data available. Please analyze floorplans first.")
+else:
+    rows = []
+    for data in st.session_state["floors"]:
+        rows.append({
+            "Floor": data["floor"],
+            "AQ_S": round(data["results"]["AQ_S"], 4),
+            "AQ_F": round(data["results"]["AQ_F"], 4),
+            "Num Routes": len(data["results"]["routes"]),
+        })
+    df = pd.DataFrame(rows)
+    st.dataframe(df)
 
-results = st.session_state["results"]
-routes = st.session_state["routes"]
-floor_graphs = st.session_state["floor_graphs"]
+    combined_AQ = df["AQ_S"].mean()
+    st.success(f"Combined Multi-Floor AQ_S: **{combined_AQ:.3f}**")
 
-st.subheader("Summary Metrics")
-st.json({"AQ_S": results["AQ_S"], "AQ_F": results["AQ_F"], "num_routes": len(routes)})
+    st.markdown("### Individual Route Details")
+    for floor_data in st.session_state["floors"]:
+        st.markdown(f"#### Floor {floor_data['floor']}")
+        for r in floor_data["results"]["routes"]:
+            st.write(r)
 
-rows = []
-for r in results["routes"]:
-    dp_str = ", ".join(f"{dp[0]}" for dp in r["decision_points"])
-    rows.append({
-        "Route": r["route_id"] + 1,
-        "Turns": r["turns"],
-        "Length_px": int(r["length"]),
-        "DecisionPoints": dp_str
-    })
-df = pd.DataFrame(rows)
-st.dataframe(df)
-
-# Visualization per floor
-st.subheader("Floor-by-Floor Skeletons")
-cols = st.columns(len(floor_graphs))
-for i, fg in enumerate(floor_graphs):
-    with cols[i]:
-        fig, ax = plt.subplots(figsize=(4, 4))
-        ax.imshow(fg["skel"], cmap="gray")
-        ax.set_title(fg["name"])
-        ax.axis("off")
-        st.pyplot(fig, use_container_width=True)
