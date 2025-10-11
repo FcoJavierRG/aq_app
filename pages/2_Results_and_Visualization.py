@@ -99,11 +99,16 @@ if len(floor_graphs) > 1:
         skel = fg["skel"]
         alpha = 0.3 + 0.2*idx
         ax2.imshow(skel, cmap="gray", alpha=alpha)
-    # Overlay vertical edges (type='vertical')
-    G_total = nx.compose_all([fg["G"] for fg in floor_graphs])
-    for u,v,d in G_total.edges(data=True):
-        if d.get("type") == "vertical":
-            xu, yu = G_total.nodes[u]["x"], G_total.nodes[u]["y"]
-            xv, yv = G_total.nodes[v]["x"], G_total.nodes[v]["y"]
-            ax2.plot([xu,xv],[yu,yv], 'c--', lw=2)
+
+    # Compose total graph safely
+    from functools import reduce
+    graphs_to_merge = [fg["G"] for fg in floor_graphs if "G" in fg and fg["G"] is not None]
+    if graphs_to_merge:
+        G_total = reduce(nx.compose, graphs_to_merge)
+        # Overlay vertical edges
+        for u,v,d in G_total.edges(data=True):
+            if d.get("type") == "vertical":
+                xu, yu = G_total.nodes[u]["x"], G_total.nodes[u]["y"]
+                xv, yv = G_total.nodes[v]["x"], G_total.nodes[v]["y"]
+                ax2.plot([xu,xv],[yu,yv], 'c--', lw=2)
     st.pyplot(fig2)
