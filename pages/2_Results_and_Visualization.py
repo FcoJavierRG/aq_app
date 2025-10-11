@@ -1,36 +1,18 @@
-import streamlit as st
 import plotly.graph_objects as go
 from functools import reduce
-import numpy as np
-import networkx as nx
 
-st.title("📊 Multi-Floor 3D Route Visualization")
-
-# Check session state
-if "results" not in st.session_state:
-    st.warning("No analysis found. Please upload floorplans first.")
-    st.stop()
-
-results = st.session_state["results"]
-routes = st.session_state["routes"]
-floor_graphs = st.session_state["floor_graphs"]
-
-# ===========================
-# 3D Figure
-# ===========================
-fig = go.Figure()
+st.subheader("Multi-Floor 3D Route Visualization")
 
 # Assign each floor a Z-level
 floor_levels = {idx+1: idx*10 for idx in range(len(floor_graphs))}  # floors separated by 10 units
 
-# Plot skeletons per floor as semi-transparent surface
-for fg in floor_graphs:
-    z = floor_levels[fg["name"].split()[-1]]  # floor number
-    skel = fg["skel"]
-    h, w = skel.shape
-    # Only plot walkable areas
-    ys, xs = np.where(skel > 0)
-    zs = np.full_like(xs, z)
+fig = go.Figure()
+
+# Plot skeleton points per floor
+for idx, fg in enumerate(floor_graphs):
+    z_level = floor_levels[idx+1]
+    ys, xs = np.where(fg["skel"] > 0)
+    zs = np.full_like(xs, z_level)
     fig.add_trace(go.Scatter3d(
         x=xs, y=ys, z=zs,
         mode='markers',
@@ -43,8 +25,8 @@ colors = ['red','blue','green','orange','purple','brown','pink','cyan','magenta'
 for r_idx, route in enumerate(routes):
     xs, ys, zs = [], [], []
     for n in route:
-        # Find which floor
-        floor = next((idx+1 for idx, fg in enumerate(floor_graphs) if n in fg["G"].nodes), None)
+        # Find which floor the node belongs to
+        floor = next((i+1 for i, fg in enumerate(floor_graphs) if n in fg["G"].nodes), None)
         if floor is None:
             continue
         G = floor_graphs[floor-1]["G"]
@@ -59,7 +41,6 @@ for r_idx, route in enumerate(routes):
         name=f"Route {r_idx+1}"
     ))
 
-# Layout
 fig.update_layout(
     scene=dict(
         xaxis=dict(title='X', visible=False),
