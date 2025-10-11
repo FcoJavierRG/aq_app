@@ -2,28 +2,20 @@
 import streamlit as st
 
 st.title("About & Help")
-
 st.markdown("""
-### What is AccessQuotient (AQ)?
-**AccessQuotient** quantifies how easily a person can move through a space, based on the **structure and connectivity** of paths.
+### Floorplan Accessibility Tool
 
-### How It Works
-1. Detect walkable areas from the floorplan.
-2. Convert them into a **skeleton** of navigable routes.
-3. Build a **graph network** connecting junctions and corridors.
-4. Calculate accessibility scores from **path lengths**, **turn angles**, and **branching complexity**.
+This app evaluates **AccessQuotient (AQ)** — a measure of navigability in a building.
 
-### Key Metrics
-- **AQ_S** — Sum of accessibility probabilities across all main routes.
-- **AQ_F** — Average accessibility (fluency) across routes.
-- **P_MF** — Probability of making the correct movement.
-- **E_M** — Effort measure (lower = better).
+#### How It Works
+1. Upload one or more floorplan images.
+2. The tool extracts **walkable routes** from each floor.
+3. Floors are linked via **vertical connectors** (stairs/elevators).
+4. AQ is computed based on route structure and number of turns.
 
-### Tips
-- If you see *0 routes or turns*, increase `min_branch_len` or reduce `angle_thresh_deg`.
-- For clean vector drawings (PDF), use a higher `px_per_meter` (e.g., 100).
-- For scanned images, reduce `px_per_meter` or smooth with larger `blur_ksize`.
-
-### Authors
-Developed by *[Your Name]* as part of research on spatial accessibility and indoor navigation.
+#### Outputs
+- **AQ_S**: Structural accessibility score (fewer turns = higher AQ).
+- **AQ_F**: Functional accessibility score (accounts for total path length).
+- **Routes Table**: Detailed per-path data.
+- **Skeletons**: Visual representation of traversable paths.
 """)
