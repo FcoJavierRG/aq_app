@@ -3,7 +3,7 @@ import streamlit as st
 from aq_tool import run_aq_pipeline, extract_routes, compute_access_quotient, plot_routes_side_by_side
 import tempfile, os
 
-st.title("📤 Upload and Analyze Floorplans")
+st.title("Upload and Analyze Floorplans")
 
 uploaded_files = st.file_uploader(
     "Upload one or more floorplans",
@@ -14,7 +14,7 @@ uploaded_files = st.file_uploader(
 if uploaded_files:
     st.session_state["floors"] = []
     for i, f in enumerate(uploaded_files, 1):
-        st.subheader(f"🏠 Floor {i}")
+        st.subheader(f" Floor {i}")
         with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(f.name)[1]) as tmp:
             tmp.write(f.read())
             tmp_path = tmp.name
@@ -36,7 +36,7 @@ if uploaded_files:
         st.json(results)
         st.pyplot(plot_routes_side_by_side(tmp_path, skel, G, routes))
 
-    st.success("✅ Floors processed! View detailed results on the **Results** page.")
+    st.success("Floors processed! View detailed results on the **Results** page.")
 else:
     st.info("Upload one or more floorplan images to begin.")
 
