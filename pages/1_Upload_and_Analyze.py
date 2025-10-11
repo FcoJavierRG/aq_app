@@ -1,6 +1,6 @@
 # pages/1_Upload_and_Analyze.py
 import streamlit as st
-from aq_tool import run_aq_pipeline, extract_routes, compute_access_quotient, plot_routes_side_by_side
+from aq_tool import run_aq_pipeline, extract_routes, compute_access_quotient, draw_routes_on_image
 import tempfile, os
 
 st.title("Upload and Analyze Floorplans")
