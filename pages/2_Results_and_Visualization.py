@@ -1,10 +1,12 @@
 # pages/2_📈_Results_and_Visualization.py
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
 import numpy as np
+import networkx as nx
+import plotly.graph_objects as go
+from functools import reduce
 
-st.title("📈 Results and Visualization")
+st.title("📈 Results and Visualization (Interactive)")
 
 if "results" not in st.session_state:
     st.warning("No analysis found. Please upload floorplans first.")
@@ -38,77 +40,114 @@ for r in results["routes"]:
 df = pd.DataFrame(rows)
 st.dataframe(df)
 
-# Bar chart for AQ metrics per route
-st.subheader("AQ Metrics per Route")
-aq_df = pd.DataFrame({
-    "Route": [r["route_id"]+1 for r in results["routes"]],
-    "P_MF": [r["P_MF"] for r in results["routes"]],
-    "1/(1+E_M)": [1.0/(1.0+r["E_M"]) for r in results["routes"]]
-})
-st.bar_chart(aq_df.set_index("Route"))
-
 # ===========================
-# Floor-by-Floor Visualization
+# Floor Selection
 # ===========================
-st.subheader("Floor Skeletons with Routes and Decision Points")
-
 floor_names = [fg["name"] for fg in floor_graphs]
-selected_floor_idx = st.selectbox("Select floor", range(len(floor_graphs)), format_func=lambda i: floor_names[i])
+selected_floor_idx = st.selectbox("Select floor to visualize", range(len(floor_graphs)), format_func=lambda i: floor_names[i])
 fg = floor_graphs[selected_floor_idx]
 G = fg["G"]
 
-fig, ax = plt.subplots(figsize=(6,6))
-ax.imshow(fg["skel"], cmap="gray")
-ax.set_title(f"{fg['name']} Skeleton + Routes")
-ax.axis("off")
+# ===========================
+# Interactive Plotly Skeleton + Routes
+# ===========================
+st.subheader(f"Floor: {fg['name']} - Skeleton & Routes")
+fig = go.Figure()
 
-# Overlay routes for this floor
-colors = plt.cm.tab10.colors
+# Skeleton as heatmap
+skel_img = np.flipud(fg["skel"])  # flip for correct orientation
+fig.add_trace(go.Heatmap(
+    z=skel_img,
+    colorscale="gray",
+    showscale=False,
+    hoverinfo="skip"
+))
+
+# Overlay routes
+colors = px_colors = ['red','blue','green','orange','purple','brown','pink','cyan','magenta','lime']
 for r_idx, route in enumerate(routes):
-    # Filter nodes by floor
-    floor_nodes = [n for n in route if G.nodes[n]["floor"] == selected_floor_idx + 1]
+    floor_nodes = [n for n in route if G.nodes[n]["floor"] == selected_floor_idx+1]
     if len(floor_nodes) < 2:
         continue
-    yx = np.array([(G.nodes[n]["y"], G.nodes[n]["x"]) for n in floor_nodes])
-    ax.plot(yx[:,1], yx[:,0], color=colors[r_idx % len(colors)], lw=2, label=f"Route {r_idx+1}")
+    yx = np.array([[G.nodes[n]["y"], G.nodes[n]["x"]] for n in floor_nodes])
+    fig.add_trace(go.Scatter(
+        x=yx[:,1], y=np.flipud(yx[:,0]),  # flip y
+        mode="lines+markers",
+        line=dict(color=colors[r_idx % len(colors)], width=2),
+        name=f"Route {r_idx+1}"
+    ))
 
-    # Mark decision points (junctions and turns)
+    # Decision points and turns
     route_info = results["routes"][r_idx]
     for dp in route_info["decision_points"]:
         dp_id = dp[0]
         if isinstance(dp_id, int) and dp_id in floor_nodes:
-            ax.plot(G.nodes[dp_id]["x"], G.nodes[dp_id]["y"], 'ro', markersize=5)
+            fig.add_trace(go.Scatter(
+                x=[G.nodes[dp_id]["x"]],
+                y=[np.flipud(np.array([G.nodes[dp_id]["y"]]))[0]],
+                mode="markers",
+                marker=dict(color='red', size=8),
+                name=f"Junction {r_idx+1}",
+                showlegend=False
+            ))
         elif isinstance(dp_id, str) and "turn_" in dp_id:
             idx = int(dp_id.split("_")[1])
             if idx < len(floor_nodes):
                 node = floor_nodes[idx]
-                ax.plot(G.nodes[node]["x"], G.nodes[node]["y"], 'mo', markersize=5)  # magenta for turn
+                fig.add_trace(go.Scatter(
+                    x=[G.nodes[node]["x"]],
+                    y=[np.flipud(np.array([G.nodes[node]["y"]]))[0]],
+                    mode="markers",
+                    marker=dict(color='magenta', size=8),
+                    name=f"Turn {r_idx+1}",
+                    showlegend=False
+                ))
 
-ax.legend()
-st.pyplot(fig)
+fig.update_layout(
+    height=600,
+    width=600,
+    xaxis=dict(scaleanchor="y", showgrid=False, zeroline=False),
+    yaxis=dict(showgrid=False, zeroline=False, autorange='reversed'),
+    margin=dict(l=0,r=0,t=30,b=0)
+)
+st.plotly_chart(fig, use_container_width=True)
 
 # ===========================
-# Multi-Floor Combined View
+# Multi-Floor Overview
 # ===========================
 if len(floor_graphs) > 1:
     st.subheader("Multi-Floor Connectivity Overview")
-    fig2, ax2 = plt.subplots(figsize=(6,6))
-    ax2.set_title("Merged Floors with Routes")
-    ax2.axis("off")
+    fig2 = go.Figure()
     for idx, fg in enumerate(floor_graphs):
-        skel = fg["skel"]
-        alpha = 0.3 + 0.2*idx
-        ax2.imshow(skel, cmap="gray", alpha=alpha)
-
-    # Compose total graph safely
-    from functools import reduce
+        skel_img = np.flipud(fg["skel"])
+        fig2.add_trace(go.Heatmap(
+            z=skel_img,
+            colorscale='gray',
+            showscale=False,
+            opacity=0.2 + 0.2*idx,
+            hoverinfo="skip"
+        ))
+    # Compose total graph
     graphs_to_merge = [fg["G"] for fg in floor_graphs if "G" in fg and fg["G"] is not None]
     if graphs_to_merge:
         G_total = reduce(nx.compose, graphs_to_merge)
-        # Overlay vertical edges
         for u,v,d in G_total.edges(data=True):
             if d.get("type") == "vertical":
                 xu, yu = G_total.nodes[u]["x"], G_total.nodes[u]["y"]
                 xv, yv = G_total.nodes[v]["x"], G_total.nodes[v]["y"]
-                ax2.plot([xu,xv],[yu,yv], 'c--', lw=2)
-    st.pyplot(fig2)
+                fig2.add_trace(go.Scatter(
+                    x=[xu, xv],
+                    y=[np.flipud(np.array([yu, yv]))[0]],
+                    mode="lines",
+                    line=dict(color='cyan', dash='dash', width=2),
+                    name='Vertical Connection'
+                ))
+
+    fig2.update_layout(
+        height=600,
+        width=600,
+        xaxis=dict(scaleanchor="y", showgrid=False, zeroline=False),
+        yaxis=dict(showgrid=False, zeroline=False, autorange='reversed'),
+        margin=dict(l=0,r=0,t=30,b=0)
+    )
+    st.plotly_chart(fig2, use_container_width=True)
