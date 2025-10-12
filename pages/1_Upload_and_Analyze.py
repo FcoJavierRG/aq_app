@@ -1,46 +1,40 @@
 import streamlit as st
-import tempfile
-import os
-from aq_tool import run_aq_pipeline, extract_routes, compute_access_quotient
+from aq_tool import run_aq_pipeline, extract_routes, compute_access_quotient, plot_routes_side_by_side
+import tempfile, os
 
-st.title("🏢 Upload and Analyze Floor Plans")
+st.title("📤 Upload and Analyze Floorplans")
 
-num_floors = st.number_input("Number of floors to analyze", min_value=1, max_value=10, value=1)
-uploaded_files = [st.file_uploader(f"Upload Floor {i+1} Plan", type=["png", "jpg", "jpeg", "pdf"], key=f"file_{i}")
-                  for i in range(num_floors)]
+uploaded_files = st.file_uploader(
+    "Upload one or more floorplans",
+    type=["png", "jpg", "jpeg", "pdf"],
+    accept_multiple_files=True
+)
 
-if st.button("Run Multi-Floor Analysis"):
-    st.session_state.results = []
-    st.session_state.graphs = []
-    st.session_state.skeletons = []
+if uploaded_files:
+    st.session_state["floors"] = []
+    for i, f in enumerate(uploaded_files, 1):
+        st.subheader(f"🏠 Floor {i}")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(f.name)[1]) as tmp:
+            tmp.write(f.read())
+            tmp_path = tmp.name
 
-    for i, uploaded in enumerate(uploaded_files):
-        if uploaded is None:
-            st.warning(f"Please upload Floor {i+1} before running.")
-            st.stop()
+        metrics, G, skel = run_aq_pipeline(tmp_path, return_skeleton=True)
+        routes, weights = extract_routes(G, max_routes=5)
+        results = compute_access_quotient(G, routes, weights)
 
-        suffix = os.path.splitext(uploaded.name)[1]
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-        tmp.write(uploaded.getvalue())
-        tmp.flush()
+        st.session_state["floors"].append({
+            "floor": i,
+            "file": tmp_path,
+            "metrics": metrics,
+            "results": results,
+            "G": G,
+            "routes": routes,
+            "skeleton": skel,
+        })
 
-        try:
-            metrics, G, skel = run_aq_pipeline(tmp.name, return_skeleton=True)
-            routes, weights = extract_routes(G)
-            results = compute_access_quotient(G, routes, weights)
+        st.json(results)
+        st.pyplot(plot_routes_side_by_side(tmp_path, skel, G, routes))
 
-            st.session_state.results.append({
-                "floor": i + 1,
-                "metrics": metrics,
-                "routes": results["routes"],
-                "AQ_S": results["AQ_S"],
-                "AQ_F": results["AQ_F"]
-            })
-            st.session_state.graphs.append(G)
-            st.session_state.skeletons.append(skel)
-
-            st.success(f"✅ Floor {i+1} processed successfully.")
-        except Exception as e:
-            st.error(f"Pipeline failed for Floor {i+1}: {e}")
-
-    st.success("✅ All floors processed! Go to the **Results and Visualization** page to view combined results.")
+    st.success("✅ Floors processed! View detailed results on the **Results** page.")
+else:
+    st.info("Upload one or more floorplan images to begin.")
