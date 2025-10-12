@@ -47,16 +47,25 @@ df = pd.DataFrame(rows)
 st.dataframe(df)
 
 # ============================================
-# 3D Multi-Floor Route Visualization (Enhanced)
+# 3D Multi-Floor Route Visualization (Enhanced + Route Selection)
 # ============================================
 st.subheader("Multi-Floor 3D Route Visualization")
-
-fig3 = go.Figure()
 
 floor_gap = 10  # vertical distance between floors
 colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'cyan', 'magenta', 'lime']
 
-# Add floor skeletons as faint gray layers
+# Let user choose which routes to show
+all_route_labels = [f"Route {i+1}" for i in range(len(routes))]
+selected_routes = st.multiselect(
+    "Select routes to visualize",
+    all_route_labels,
+    default=all_route_labels[:5]  # show first 5 by default
+)
+
+# Initialize figure
+fig3 = go.Figure()
+
+# Add faint floor surfaces
 for idx, fg in enumerate(floor_graphs):
     z_level = idx * floor_gap
     skel_img = np.flipud(fg["skel"])
@@ -73,10 +82,15 @@ for idx, fg in enumerate(floor_graphs):
         name=f"Floor {idx+1}"
     ))
 
-# Now plot the routes
+# Get total graph
 G_total = nx.compose_all([fg["G"] for fg in floor_graphs])
 
+# Plot only selected routes
 for r_idx, route in enumerate(routes):
+    route_label = f"Route {r_idx+1}"
+    if route_label not in selected_routes:
+        continue
+
     x_vals, y_vals, z_vals = [], [], []
 
     for n in route:
@@ -87,17 +101,38 @@ for r_idx, route in enumerate(routes):
             z_vals.append((node["floor"] - 1) * floor_gap)
 
     if len(x_vals) > 1:
+        color = colors[r_idx % len(colors)]
         fig3.add_trace(go.Scatter3d(
             x=x_vals,
             y=y_vals,
             z=z_vals,
             mode="lines+markers",
-            line=dict(color=colors[r_idx % len(colors)], width=6),
+            line=dict(color=color, width=6),
             marker=dict(size=4),
-            name=f"Route {r_idx+1}"
+            name=route_label
         ))
 
-# Highlight vertical (inter-floor) edges
+        # Add start and end points
+        fig3.add_trace(go.Scatter3d(
+            x=[x_vals[0]], y=[y_vals[0]], z=[z_vals[0]],
+            mode="markers+text",
+            marker=dict(color="blue", size=8, symbol="circle"),
+            text="Start",
+            textposition="top center",
+            name=f"{route_label} Start",
+            showlegend=False
+        ))
+        fig3.add_trace(go.Scatter3d(
+            x=[x_vals[-1]], y=[y_vals[-1]], z=[z_vals[-1]],
+            mode="markers+text",
+            marker=dict(color="red", size=8, symbol="circle"),
+            text="End",
+            textposition="top center",
+            name=f"{route_label} End",
+            showlegend=False
+        ))
+
+# Highlight vertical edges in cyan
 for u, v, d in G_total.edges(data=True):
     if d.get("type") == "vertical":
         xu, yu, zu = G_total.nodes[u]["x"], G_total.nodes[u]["y"], (G_total.nodes[u]["floor"] - 1) * floor_gap
@@ -107,7 +142,7 @@ for u, v, d in G_total.edges(data=True):
             y=[yu, yv],
             z=[zu, zv],
             mode="lines",
-            line=dict(color="cyan", width=8, dash="dash"),
+            line=dict(color="cyan", width=6, dash="dot"),
             hovertext="Vertical Connection",
             name="Vertical Link",
             showlegend=False
@@ -117,8 +152,10 @@ fig3.update_layout(
     scene=dict(
         xaxis=dict(visible=False),
         yaxis=dict(visible=False),
-        zaxis=dict(title="Floor", tickvals=[i * floor_gap for i in range(len(floor_graphs))],
-                   ticktext=[f"Floor {i+1}" for i in range(len(floor_graphs))]),
+        zaxis=dict(
+            title="Floor",
+            tickvals=[i * floor_gap for i in range(len(floor_graphs))],
+            ticktext=[f"Floor {i+1}" for i in range(len(floor_graphs))]),
         aspectmode="data"
     ),
     height=800,
@@ -126,3 +163,4 @@ fig3.update_layout(
 )
 
 st.plotly_chart(fig3, use_container_width=True)
+
