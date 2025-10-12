@@ -232,6 +232,7 @@ def compute_access_quotient(G, routes, weights,
         route_len = sum(G.edges[u,v].get("weight",1.0) for u,v in zip(route[:-1], route[1:]))
 
         # 1. Process JUNCTIONS (nodes with degree >= 3)
+        # This part of the original code is correct.
         for i in range(1, len(route) - 1):
             node = route[i]
             if G.degree[node] >= 3:
@@ -248,21 +249,30 @@ def compute_access_quotient(G, routes, weights,
                     decision_points.append({"node": node, "type": "junction", "N_ij": N_ij})
 
         # 2. Process TURNS using geometric analysis of the full pixel path
+        # The original code's `elif deg == 2` block was flawed because the `route`
+        # list only contains junctions, not the points in between.
+        # This new logic correctly stitches the paths together and analyzes them.
         full_pixel_path = []
-        for i in range(len(route) - 1):
-            u, v = route[i], route[i+1]
-            segment_path = G.edges[u, v].get("path", [])
-            # Ensure correct path direction and avoid duplicating connection points
-            if full_pixel_path and full_pixel_path[-1] == segment_path[0]:
-                full_pixel_path.extend(segment_path[1:])
-            else:
-                 full_pixel_path.extend(segment_path)
-        
+        if len(route) > 1:
+            # Correctly stitch together the full pixel path for the route
+            for i in range(len(route) - 1):
+                u, v = route[i], route[i+1]
+                if not G.has_edge(u, v): continue
+                
+                segment = G.edges[u,v].get('path', [])
+                if not segment: continue
+                
+                # Orient the segment to follow the route's direction
+                if not full_pixel_path or full_pixel_path[-1] == segment[0]:
+                    full_pixel_path.extend(segment if not full_pixel_path else segment[1:])
+                elif full_pixel_path[-1] == segment[-1]:
+                    full_pixel_path.extend(list(reversed(segment))[1:])
+
         if len(full_pixel_path) > 2:
-            # RDP works on (x,y) points, not (y,x)
+            # RDP works on (x,y) points, not the (y,x) from numpy arrays
             xy_path = [(p[1], p[0]) for p in full_pixel_path]
             
-            # Use min_turn_len_px as the epsilon for simplification
+            # Use min_turn_len_px as the epsilon for path simplification
             simplified_path = _rdp(xy_path, epsilon=min_turn_len_px)
 
             if len(simplified_path) > 2:
