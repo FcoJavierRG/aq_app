@@ -4,17 +4,26 @@ st.set_page_config(page_title="Floorplan AQ Tool", layout="wide")
 
 st.title("Floorplan Accessibility (AccessQuotient) Tool")
 st.markdown("""
-Welcome to the **Floorplan AQ Tool** — a visual analytics platform for evaluating spatial accessibility based on the AccessQuotient metric.
+Welcome to the **Floorplan AQ Tool**, an interactive platform for evaluating spatial accessibility. 
+This tool allows you to analyze floorplans to understand and quantify navigational complexity.
 
-This tool processes a floorplan image to identify walkable paths, extracts key routes, and calculates accessibility scores that reflect navigational complexity for individuals with Blind and Visual Impairments (BVI).
+**Follow this workflow:**
 
-### How to Use the Tool
+1.  **Upload and Analyze:**
+    * Navigate to this page using the sidebar.
+    * Upload your floorplan (PNG, JPG, or PDF) and set the analysis parameters.
+    * The tool will automatically process the image and build a complete pathway graph.
 
-Use the sidebar on the left to navigate between pages:
+2.  **Define Custom Routes (Optional):**
+    * After the initial analysis, a **Manual Route Selection** panel will appear.
+    * Use the generated node map to define a list of specific start and end points for routes you wish to evaluate.
 
-1.  ** Upload and Analyze**: Upload your floorplan (PNG, JPG, or PDF) and configure the analysis parameters. This is the first step.
-2.  **[Image of a bar chart] Results and Visualization**: After analysis, this page will display the calculated AccessQuotient scores, detailed metrics for each route, and an interactive visualization of the routes overlaid on your floorplan.
-3.  ** About**: Learn more about the AccessQuotient methodology, the parameters, and how the tool works.
+3.  **Results and Visualization:**
+    * Go to this page to view a detailed breakdown of both the automatically detected routes and your custom-defined routes.
+    * Explore metrics like **AccessQuotient (Strict & Flexible)**, expected mistakes, and the number of turns and junctions.
 
-Ready to start? Select **Upload and Analyze** from the sidebar.
+4.  **About:**
+    * Visit this page for detailed explanations of the methodology and the various parameters you can adjust.
+
+---
 """)
