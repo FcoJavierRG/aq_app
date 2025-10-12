@@ -1,97 +1,171 @@
-# ================================================================
-# 7. Faster route extraction (no all-pairs)
-# ================================================================
-def extract_routes(G: nx.Graph, max_routes=5, overlap_thresh=0.7):
-    """
-    Extract diverse routes using endpoint sampling + Dijkstra 
-    (much faster than all-pairs).
-    """
-    if G.number_of_nodes() == 0:
+# aq_tool.py
+import cv2
+import numpy as np
+import networkx as nx
+from skimage.morphology import skeletonize
+from scipy.spatial import distance
+
+# ============================================================
+# HELPER: Load and preprocess image
+# ============================================================
+def load_floorplan(image_path):
+    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        raise ValueError(f"Could not load image: {image_path}")
+    img = cv2.GaussianBlur(img, (3, 3), 0)
+    _, bw = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    bw = 255 - bw  # invert, corridors = white
+    return bw
+
+
+# ============================================================
+# HELPER: Skeletonization
+# ============================================================
+def extract_skeleton(binary_img):
+    """Return thinned skeleton as binary numpy array."""
+    skel = skeletonize(binary_img > 0)
+    skel = (skel * 255).astype(np.uint8)
+    return skel
+
+
+# ============================================================
+# GRAPH: Build graph from skeleton
+# ============================================================
+def skeleton_to_graph(skel):
+    """Convert skeleton pixels to graph nodes and edges."""
+    G = nx.Graph()
+    coords = np.argwhere(skel > 0)
+    for idx, (y, x) in enumerate(coords):
+        G.add_node(idx, x=int(x), y=int(y))
+    # connect 8-neighbors
+    for i, (y, x) in enumerate(coords):
+        for dy in [-1, 0, 1]:
+            for dx in [-1, 0, 1]:
+                if dy == 0 and dx == 0:
+                    continue
+                ny, nx_ = y + dy, x + dx
+                if (ny, nx_) in [tuple(p) for p in coords]:
+                    j = np.where((coords == [ny, nx_]).all(axis=1))[0]
+                    if len(j) > 0:
+                        G.add_edge(i, int(j[0]), weight=1.0)
+    return G
+
+
+# ============================================================
+# GRAPH: Simplify graph (remove degree-2 nodes)
+# ============================================================
+def simplify_graph(G):
+    G_simple = G.copy()
+    for n in list(G.nodes):
+        if G.degree[n] == 2:
+            neighbors = list(G.neighbors(n))
+            if len(neighbors) == 2:
+                u, v = neighbors
+                if not G_simple.has_edge(u, v):
+                    w = G_simple[u][n]["weight"] + G_simple[n][v]["weight"]
+                    G_simple.add_edge(u, v, weight=w)
+                G_simple.remove_node(n)
+    return G_simple
+
+
+# ============================================================
+# ROUTE EXTRACTION
+# ============================================================
+def extract_routes(G, max_routes=5):
+    """Find routes between distant nodes in the graph."""
+    nodes = list(G.nodes)
+    if len(nodes) < 2:
         return [], []
-
-    # Collect endpoints (degree==1)
-    endpoints = [n for n, d in G.degree() if d == 1]
-    if len(endpoints) < 2:
-        return [], []
-
-    routes = []
-    rng = np.random.default_rng(42)  # reproducible randomness
-    sampled = rng.choice(endpoints, size=min(len(endpoints), max_routes*2), replace=False)
-
-    for u in sampled:
-        # Find farthest node from u
-        lengths, paths = nx.single_source_dijkstra(G, u, weight="weight")
-        if not lengths:
+    coords = np.array([[G.nodes[n]["x"], G.nodes[n]["y"]] for n in nodes])
+    dist_matrix = distance.cdist(coords, coords, metric="euclidean")
+    idx_pairs = np.dstack(np.unravel_index(np.argsort(dist_matrix.ravel()), dist_matrix.shape))[0]
+    routes, weights = [], []
+    for (i, j) in idx_pairs[::-1]:
+        if i == j:
             continue
-        v = max(lengths, key=lengths.get)
-        path = paths[v]
-
-        # Check overlap with existing routes
-        edgeset = set(zip(path[:-1], path[1:]))
-        overlap = max(
-            len(edgeset & set(zip(r[:-1], r[1:]))) / max(len(edgeset), 1)
-            for r in routes
-        ) if routes else 0.0
-
-        if overlap < overlap_thresh:
+        try:
+            path = nx.shortest_path(G, nodes[i], nodes[j], weight="weight")
             routes.append(path)
-        if len(routes) >= max_routes:
-            break
-
-    weights = [1.0 / len(routes)] * len(routes) if routes else []
+            weights.append(dist_matrix[i, j])
+            if len(routes) >= max_routes:
+                break
+        except nx.NetworkXNoPath:
+            continue
     return routes, weights
 
 
-# ================================================================
-# 8. Plot + Table Output (with AQ summary)
-# ================================================================
-def plot_routes_with_table(input_path: str, G: nx.Graph, routes: list, results: dict, skeleton=None):
-    """
-    Plot routes on floorplan/skeleton and show table of P_MF, E_M, Length,
-    plus a summary row with AQ_S and AQ_F.
-    """
-    import matplotlib.cm as cm
+# ============================================================
+# AQ METRICS
+# ============================================================
+def compute_access_quotient(G, routes, weights,
+                            min_branch_len=10,
+                            angle_thresh_deg=30,
+                            min_turn_len_px=3):
+    """Compute basic AccessQuotient-like metrics."""
+    AQ_S = 0.0
+    AQ_F = 0.0
+    route_results = []
 
-    if skeleton is None:
-        img = load_image_any(input_path)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    else:
-        img = cv2.cvtColor((skeleton * 255).astype("uint8"), cv2.COLOR_GRAY2RGB)
-
-    # --- Plot ---
-    plt.figure(figsize=(10, 10))
-    plt.imshow(img)
-
-    colors = cm.get_cmap("tab10", len(routes))
-    for idx, route in enumerate(routes):
-        xs = [G.nodes[n]["x"] for n in route]
-        ys = [G.nodes[n]["y"] for n in route]
-        plt.plot(xs, ys, color=colors(idx), linewidth=2, label=f"Route {idx+1}")
-        plt.scatter(xs[0], ys[0], c="green", s=60, marker="o")  # start
-        plt.scatter(xs[-1], ys[-1], c="red", s=60, marker="x")  # end
-
-    plt.legend()
-    plt.title("Extracted Routes on Floorplan")
-    plt.axis("off")
-    plt.show()
-
-    # --- Table of metrics ---
-    rows = []
-    for r in results["routes"]:
-        rows.append({
-            "Route": r["route_id"] + 1,
-            "P_MF": round(r["P_MF"], 4),
-            "E_M": round(r["E_M"], 2),
-            "Length": len(routes[r["route_id"]])
+    for ridx, route in enumerate(routes):
+        turns = count_turns(G, route, angle_thresh_deg)
+        length = sum(G[u][v]["weight"] for u, v in zip(route[:-1], route[1:]))
+        E_M = np.exp(-0.05 * turns) if turns > 0 else 1.0
+        P_MF = 1.0 / (1.0 + length / 100.0)
+        AQ_S += E_M
+        AQ_F += P_MF
+        route_results.append({
+            "route_id": ridx,
+            "turns": turns,
+            "length": length,
+            "E_M": E_M,
+            "P_MF": P_MF,
+            "decision_points": [(i, route[i]) for i in range(0, len(route), max(1, len(route)//4))]
         })
 
-    # Add summary row
-    rows.append({
-        "Route": "SUMMARY",
-        "P_MF": f"AQ_S={round(results['AQ_S'],4)}",
-        "E_M": f"AQ_F={round(results['AQ_F'],4)}",
-        "Length": "-"
-    })
+    if routes:
+        AQ_S /= len(routes)
+        AQ_F /= len(routes)
 
-    df = pd.DataFrame(rows)
-    display(df)
+    return {"AQ_S": AQ_S, "AQ_F": AQ_F, "routes": route_results}
+
+
+# ============================================================
+# TURN COUNT HELPER
+# ============================================================
+def count_turns(G, route, angle_thresh_deg=30):
+    """Count how many turns occur along a route."""
+    if len(route) < 3:
+        return 0
+    turns = 0
+    for i in range(1, len(route) - 1):
+        n1, n2, n3 = route[i-1], route[i], route[i+1]
+        x1, y1 = G.nodes[n1]["x"], G.nodes[n1]["y"]
+        x2, y2 = G.nodes[n2]["x"], G.nodes[n2]["y"]
+        x3, y3 = G.nodes[n3]["x"], G.nodes[n3]["y"]
+        v1 = np.array([x2 - x1, y2 - y1])
+        v2 = np.array([x3 - x2, y3 - y2])
+        dot = np.dot(v1, v2)
+        if np.linalg.norm(v1) == 0 or np.linalg.norm(v2) == 0:
+            continue
+        angle = np.degrees(np.arccos(np.clip(dot / (np.linalg.norm(v1)*np.linalg.norm(v2)), -1.0, 1.0)))
+        if angle > angle_thresh_deg:
+            turns += 1
+    return turns
+
+
+# ============================================================
+# PIPELINE WRAPPER
+# ============================================================
+def run_aq_pipeline(image_path, px_per_meter=50, return_skeleton=False):
+    """Full AQ pipeline: image -> skeleton -> graph -> metrics."""
+    img = load_floorplan(image_path)
+    skel = extract_skeleton(img)
+    G = skeleton_to_graph(skel)
+    G = simplify_graph(G)
+
+    routes, weights = extract_routes(G)
+    results = compute_access_quotient(G, routes, weights)
+
+    if return_skeleton:
+        return results, G, skel
+    return results, G
