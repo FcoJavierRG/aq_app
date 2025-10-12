@@ -1,8 +1,24 @@
-streamlit
-opencv-python-headless
-networkx
-matplotlib
-pandas
-numpy
-scikit-image
-PyMuPDF
+# Core web app framework
+streamlit==1.39.0
+
+# Interactive plots and 3D visualization
+plotly==5.24.0
+streamlit-plotly-events==0.0.6
+
+# Image processing
+opencv-python-headless==4.10.0.84
+scikit-image==0.24.0
+
+# Graphs and network analysis
+networkx==3.3
+
+# Numerical & data handling
+numpy==1.26.4
+pandas==2.2.3
+scipy==1.13.1
+
+# Visualization support
+matplotlib==3.9.2
+
+# Utilities
+Pillow==10.4.0
