@@ -1,27 +1,36 @@
 import streamlit as st
 import pandas as pd
+from aq_tool import draw_routes_on_image, link_floors
 
 st.title("📈 Results and Visualization")
 
-if "floors" not in st.session_state or not st.session_state["floors"]:
-    st.warning("No data available. Please analyze floorplans first.")
-else:
-    rows = []
-    for data in st.session_state["floors"]:
-        rows.append({
-            "Floor": data["floor"],
-            "AQ_S": round(data["results"]["AQ_S"], 4),
-            "AQ_F": round(data["results"]["AQ_F"], 4),
-            "Num Routes": len(data["results"]["routes"]),
-        })
-    df = pd.DataFrame(rows)
-    st.dataframe(df)
+if "results" not in st.session_state or len(st.session_state.results) == 0:
+    st.warning("No analysis found. Please go to the 'Upload and Analyze' page first.")
+    st.stop()
 
-    combined_AQ = df["AQ_S"].mean()
-    st.success(f"🏗 Combined Multi-Floor AQ_S: **{combined_AQ:.3f}**")
+# --- Combine metrics into one summary table ---
+rows = []
+for res in st.session_state.results:
+    rows.append({
+        "Floor": res["floor"],
+        "AQ_S": round(res["AQ_S"], 4),
+        "AQ_F": round(res["AQ_F"], 4),
+        "Routes": len(res["routes"]),
+        "Nodes": res["metrics"]["num_nodes"],
+        "Edges": res["metrics"]["num_edges"],
+    })
 
-    st.markdown("### 📊 Individual Route Details")
-    for floor_data in st.session_state["floors"]:
-        st.markdown(f"#### 🏠 Floor {floor_data['floor']}")
-        for r in floor_data["results"]["routes"]:
-            st.write(r)
+df = pd.DataFrame(rows)
+st.subheader("Summary Metrics per Floor")
+st.dataframe(df)
+
+# --- Multi-floor combined visualization ---
+st.subheader("Combined Multi-Floor Route Visualization")
+
+try:
+    G_total = link_floors(st.session_state.graphs)
+    # Use the first skeleton just for background — purely visual
+    fig = draw_routes_on_image(G_total, [], st.session_state.skeletons[0])
+    st.pyplot(fig)
+except Exception as e:
+    st.error(f"Visualization failed: {e}")
