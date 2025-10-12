@@ -116,7 +116,6 @@ def skeleton_to_graph(skel: np.ndarray, gcfg: GraphConfig) -> nx.Graph:
     G = nx.Graph()
     point_to_node = {}
     for idx, (y, x) in enumerate(keypoints):
-        # FIX: Add the 'pos' attribute for visualization compatibility
         G.add_node(idx, y=float(y), x=float(x), pos=(y, x))
         point_to_node[(y, x)] = idx
 
@@ -143,7 +142,7 @@ def skeleton_to_graph(skel: np.ndarray, gcfg: GraphConfig) -> nx.Graph:
 
                 nbrs = [(ny, nx) for ny, nx in _neighbors(cy, cx, h, w) if (ny, nx) in S and (ny, nx) != (py, px)]
                 if not nbrs: break
-                if len(nbrs) > 1: break # Should not happen on skeleton path
+                if len(nbrs) > 1: break 
                 py, px = cy, cx
                 cy, cx = nbrs[0]
 
@@ -207,15 +206,13 @@ def _angle_between(a, b):
     cosv = max(-1.0, min(1.0, cosv))
     return math.degrees(math.acos(cosv))
 
-# FIX: Define _get_full_pixel_path as a standalone function
-def _get_full_pixel_path(G, route):
+def get_full_pixel_path(G, route):
     """Reconstructs the full, ordered pixel path for a given route of nodes."""
     full_path = []
     if not route or len(route) < 2:
         return []
     
-    # Start with the position of the first node
-    start_node_pos = (G.nodes[route[0]]['y'], G.nodes[route[0]]['x'])
+    start_node_pos = G.nodes[route[0]]['pos']
     full_path.append(start_node_pos)
 
     for i in range(len(route) - 1):
@@ -225,7 +222,6 @@ def _get_full_pixel_path(G, route):
         edge_data = G.get_edge_data(u, v)
         if 'path' in edge_data:
             segment = edge_data['path']
-            # Ensure the segment is in the correct order based on the last point added
             if segment[0] == full_path[-1]:
                 full_path.extend(segment[1:])
             elif segment[-1] == full_path[-1]:
@@ -276,13 +272,10 @@ def compute_access_quotient(G, routes, weights,
                     decision_points.append({"node": node, "type": "junction", "N_ij": N_ij})
 
         # 2. Process TURNS using geometric analysis of the full pixel path
-        full_pixel_path = _get_full_pixel_path(G, route)
+        full_pixel_path = get_full_pixel_path(G, route)
 
         if len(full_pixel_path) > 2:
-            # RDP works on (x,y) points, not the (y,x) from numpy arrays
             xy_path = [(p[1], p[0]) for p in full_pixel_path]
-            
-            # Use min_turn_len_px as the epsilon for path simplification
             simplified_path = _rdp(xy_path, epsilon=min_turn_len_px)
 
             if len(simplified_path) > 2:
@@ -320,11 +313,10 @@ def extract_routes(G: nx.Graph, max_routes=5, overlap_thresh=0.7):
     if G.number_of_nodes() < 2: return [], []
 
     endpoints = [n for n, d in G.degree() if d == 1]
-    if len(endpoints) < 2: endpoints = list(G.nodes) # Fallback for circular graphs
+    if len(endpoints) < 2: endpoints = list(G.nodes) 
     if len(endpoints) < 2: return [], []
     
     routes = []
-    # Using a non-fixed seed for random route selection on each run
     rng = np.random.default_rng()
     sampled = rng.choice(endpoints, size=min(len(endpoints), max_routes * 2), replace=False)
 
@@ -335,6 +327,8 @@ def extract_routes(G: nx.Graph, max_routes=5, overlap_thresh=0.7):
         path = paths[v]
 
         edgeset = set(map(frozenset, zip(path[:-1], path[1:])))
+        if not edgeset: continue
+        
         overlap = max([len(edgeset & r_set) / len(edgeset) for _, r_set in routes] if routes else [0.0])
         
         if overlap < overlap_thresh:
@@ -372,13 +366,8 @@ def plot_graph_with_labels(skel, G, title=""):
     
     pos = {n: (d['x'], d['y']) for n, d in G.nodes(data=True)}
     
-    # Draw nodes
     nx.draw_networkx_nodes(G, pos, ax=ax, node_size=20, node_color='red')
-    
-    # Draw edges
     nx.draw_networkx_edges(G, pos, ax=ax, edge_color='cyan')
-    
-    # Draw labels
     nx.draw_networkx_labels(G, pos, ax=ax, font_size=8, font_color='yellow',
                             bbox=dict(facecolor='red', alpha=0.5, pad=0))
     
