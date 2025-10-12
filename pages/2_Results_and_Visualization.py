@@ -77,6 +77,7 @@ fig, ax = plt.subplots(figsize=(10, 10))
 
 # Set background based on user's choice
 if bg_choice == "Floorplan Image":
+    st.info("Displaying routes on the original floorplan.")
     try:
         img_bgr = aq_tool.load_image_any(input_path)
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
@@ -88,6 +89,7 @@ if bg_choice == "Floorplan Image":
         ax.set_yticks([])
 
 elif bg_choice == "Skeleton View":
+    st.info("Displaying routes on the computed skeleton.")
     if skel is not None:
         ax.imshow(skel, cmap="gray")
     else:
