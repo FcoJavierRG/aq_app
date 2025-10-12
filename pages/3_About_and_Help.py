@@ -1,42 +1,39 @@
 import streamlit as st
 
-st.set_page_config(page_title="About", layout="wide")
+st.set_page_config(layout="wide")
 
-st.title("3. About the AccessQuotient Tool")
-
-st.markdown("""
-This tool implements the **AccessQuotient** metric, a framework designed to quantify the navigational complexity of indoor environments, specifically for individuals who are Blind or Visually Impaired (BVI).
-
-It analyzes a 2D floorplan to model potential routes and identifies decision points that can pose challenges.
-""")
+st.title("About the AccessQuotient Tool")
 
 st.header("Methodology")
-
 st.markdown("""
-The process involves several key steps:
+The **AccessQuotient (AQ)** is a metric designed to quantify the navigational complexity of an indoor space, particularly for individuals with blindness or visual impairments (BVI). It models the challenges of navigating a building by focusing on the number and complexity of decision points a person encounters along a given route.
 
-1.  **Image Preprocessing**: The uploaded floorplan is converted into a binary (black and white) image. The tool identifies walls and isolates the "walkable" free space.
-2.  **Skeletonization**: The walkable space is reduced to a thin, one-pixel-wide skeleton that represents all possible navigation paths. This skeleton forms the basis of a mathematical graph.
-3.  **Graph Extraction**: The skeleton is converted into a `networkx` graph, where junctions (intersections) and endpoints of corridors become nodes, and the paths between them become edges.
-4.  **Route Identification**: The tool automatically identifies a set of diverse, significant routes within the building, typically between major endpoints.
-5.  **AccessQuotient Calculation**: For each route, the tool calculates two key metrics based on the number and complexity of its decision points (junctions and sharp turns):
-    * **$P_{MF}$ (Probability of Mistake-Free Navigation)**: The likelihood of traversing the route without making a single wrong turn.
-    * **$E_M$ (Expected Mistakes)**: The average number of errors one might make along the route.
+The tool calculates two variants of the metric:
 
-These individual route scores are then aggregated into two final building-wide scores:
-- **`AQ_S` (Strict AccessQuotient)**: A score based on the probability of perfect, mistake-free navigation.
-- **`AQ_F` (Flexible AccessQuotient)**: A score based on the expected number of mistakes, acknowledging that errors can happen.
+-   **Strict AccessQuotient ($AQ_S$):** This measures the probability of completing a route *perfectly* with zero mistakes. It is a weighted average of the mistake-free probabilities for a set of key routes. A higher score indicates an environment that is easier to navigate without any errors.
 
-**For both metrics, a higher score indicates a more accessible, less complex environment.**
+-   **Flexible AccessQuotient ($AQ_F$):** This metric is based on the *expected number of mistakes* one might make on a route. It accounts for the fact that people can recover from errors. A higher score indicates an environment where fewer mistakes are likely to occur, even if the navigation isn't perfect.
+
+The final score for a building is a weighted average of the scores for several important routes within it.
 """)
 
-st.header("Configurable Parameters")
+st.header("Parameter Explanations")
 st.markdown("""
-The parameters in the sidebar allow you to fine-tune the analysis:
-
-- **Pixels per Meter**: Helps scale the analysis and is important for future distance-based metrics.
-- **Max Routes to Extract**: Controls how many distinct paths are analyzed. More routes provide a more comprehensive, but slower, analysis.
-- **Min Branch Length**: A noise-reduction parameter. It prevents tiny, insignificant architectural features from being counted as complex junctions.
-- **Turn Angle Threshold**: Defines what constitutes a "significant" turn. A gentle curve in a hallway is ignored, but a sharp 90-degree turn is correctly identified as a decision point.
-- **Min Turn Segment Length**: Prevents small, noisy wiggles in the skeleton from being counted as turns.
+You can fine-tune the analysis using the parameters in the sidebar on the **Upload and Analyze** page. Here's what they mean:
 """)
+
+st.subheader("Analysis Parameters")
+st.markdown("""
+-   **`px_per_meter` (approx):** This sets the physical scale of the floorplan. An accurate estimate helps in interpreting the lengths of paths and branches in real-world terms, though it does not directly affect the AQ score itself.
+-   **`max_routes`:** This controls how many diverse, long routes the tool will attempt to automatically identify after processing the floorplan. These routes are used for the "Automatic Route Analysis."
+""")
+
+st.subheader("AccessQuotient Calculation")
+st.markdown("""
+-   **`min_branch_len` (px):** At a junction (where three or more paths meet), any path shorter than this value will be ignored. This is useful for filtering out noise from the skeletonization process, such as tiny, irrelevant stubs.
+-   **`angle_thresh_deg`:** This is the minimum angle that a bend in a corridor must have to be considered a "turn" (a binary decision point). This prevents gentle curves from being counted as navigational challenges.
+-   **`min_turn_len_px`:** This parameter controls the sensitivity of the turn-detection algorithm. It acts as a "sampling distance" to smooth out the path before measuring angles.
+    -   A **low value** (e.g., 1-3) makes the detection very sensitive to small wiggles in the path.
+    -   A **high value** (e.g., 10+) will only detect large, significant changes in direction, ignoring minor curves.
+""")
+
