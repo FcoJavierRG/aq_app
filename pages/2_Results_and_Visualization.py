@@ -128,12 +128,14 @@ if len(st.session_state["clicks"]) == 2:
 # =========================
 # 3D Visualization
 # =========================
-st.subheader("🌐 3D Visualization of Selected Route")
+st.subheader("🌐 3D Multi-Floor Visualization (Enhanced)")
 
 fig3 = go.Figure()
-floor_gap = 10
+floor_gap = 15  # increased spacing for clarity
 
-# Add each floor as a 3D surface
+# Distinct color map for each floor
+floor_colors = ["gray", "lightblue", "lightgreen", "lightpink", "lightyellow", "lightcoral"]
+
 for idx, fg in enumerate(floor_graphs):
     z_level = idx * floor_gap
     skel_img = np.flipud(fg["skel"])
@@ -145,13 +147,13 @@ for idx, fg in enumerate(floor_graphs):
         x=x_coords,
         y=y_coords,
         surfacecolor=skel_img,
-        colorscale="gray",
+        colorscale=[[0, floor_colors[idx % len(floor_colors)]], [1, floor_colors[idx % len(floor_colors)]]],
         showscale=False,
-        opacity=0.3,
+        opacity=0.4,
         name=f"Floor {idx+1}"
     ))
 
-# Highlight the route
+# Highlight the selected route (if any)
 if path_nodes:
     x_vals, y_vals, z_vals = [], [], []
     for n in path_nodes:
@@ -174,7 +176,7 @@ if path_nodes:
     fig3.add_trace(go.Scatter3d(
         x=[x_vals[0]], y=[y_vals[0]], z=[z_vals[0]],
         mode="markers+text",
-        marker=dict(color="blue", size=10),
+        marker=dict(color="blue", size=12),
         text="Start",
         textposition="top center",
         showlegend=False
@@ -182,13 +184,13 @@ if path_nodes:
     fig3.add_trace(go.Scatter3d(
         x=[x_vals[-1]], y=[y_vals[-1]], z=[z_vals[-1]],
         mode="markers+text",
-        marker=dict(color="red", size=10),
+        marker=dict(color="red", size=12),
         text="End",
         textposition="top center",
         showlegend=False
     ))
 
-# Add vertical connectors (cyan lines)
+# Add vertical connectors (cyan dashed lines)
 for u, v, d in G_total.edges(data=True):
     if d.get("type") == "vertical":
         xu, yu, zu = G_total.nodes[u]["x"], G_total.nodes[u]["y"], (G_total.nodes[u]["floor"] - 1) * floor_gap
@@ -198,7 +200,7 @@ for u, v, d in G_total.edges(data=True):
             y=[yu, yv],
             z=[zu, zv],
             mode="lines",
-            line=dict(color="cyan", width=6, dash="dot"),
+            line=dict(color="cyan", width=5, dash="dot"),
             hovertext="Vertical Connection",
             showlegend=False
         ))
@@ -208,14 +210,32 @@ fig3.update_layout(
         xaxis=dict(visible=False),
         yaxis=dict(visible=False),
         zaxis=dict(
-            title="Floor",
+            title="Floor Level",
             tickvals=[i * floor_gap for i in range(len(floor_graphs))],
-            ticktext=[f"Floor {i+1}" for i in range(len(floor_graphs))]
+            ticktext=[f"Floor {i+1}" for i in range(len(floor_graphs))],
+            showgrid=True
         ),
-        aspectmode="data"
+        aspectmode="manual",
+        aspectratio=dict(x=1, y=1, z=0.6)
     ),
     height=800,
-    margin=dict(l=0, r=0, t=30, b=0)
+    margin=dict(l=0, r=0, t=30, b=0),
+    showlegend=True,
+    legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="center", x=0.5)
 )
 
 st.plotly_chart(fig3, use_container_width=True)
+
+# =========================
+# Side-by-side 2D Overview of All Floors
+# =========================
+st.subheader("🏢 Floor-by-Floor Overview (Top-down)")
+
+cols = st.columns(len(floor_graphs))
+for i, fg in enumerate(floor_graphs):
+    with cols[i]:
+        st.markdown(f"**{fg['name']}**")
+        fig, ax = plt.subplots(figsize=(3, 3))
+        ax.imshow(fg["skel"], cmap="gray")
+        ax.axis("off")
+        st.pyplot(fig, use_container_width=True)
