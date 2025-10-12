@@ -165,10 +165,10 @@ def _angle_between(a, b):
 def compute_access_quotient(G, routes, weights,
                             min_branch_len=10,
                             angle_thresh_deg=30.0,
-                            min_turn_len_px=5):
+                            min_turn_len_px=3):
     """
     Compute AccessQuotient metrics (Strict and Flexible).
-    - Treats significant turns along paths as decision points (N_ij=2).
+    - Treats significant turns at degree-2 nodes as decision points (N_ij=2).
     - Filters out tiny branches from junctions.
     """
     if not routes:
@@ -185,16 +185,18 @@ def compute_access_quotient(G, routes, weights,
         decision_points = []
         turns_count = 0
         
-        route_len_px = sum(G.edges[u,v].get("weight",1.0) for u,v in zip(route[:-1], route[1:]))
+        route_len = sum(G.edges[u,v].get("weight",1.0) for u,v in zip(route[:-1], route[1:]))
 
-        # 1. Process JUNCTIONS (nodes with degree >= 3 on the simplified graph)
-        for i in range(1, len(route) - 1):
+        for i in range(1, len(route)-1): # Iterate internal nodes
             node = route[i]
-            if G.degree[node] >= 3:
+            deg = G.degree[node]
+
+            if deg >= 3:
                 valid_branches = sum(
                     1 for nbr in G.neighbors(node) 
                     if G.edges[node, nbr].get("weight", 1.0) >= min_branch_len
                 )
+
                 if valid_branches >= 2:
                     N_ij = valid_branches
                     P_ij = 1.0 / N_ij
@@ -203,48 +205,34 @@ def compute_access_quotient(G, routes, weights,
                     E_M += E_ij
                     decision_points.append({"node": node, "type": "junction", "N_ij": N_ij})
 
-        # 2. Process TURNS by analyzing the geometry of the fine-grained paths BETWEEN junctions
-        for i in range(len(route) - 1):
-            u, v = route[i], route[i+1]
-            pixel_path = G.edges[u, v].get("path", [])
-            
-            # Use min_turn_len_px as a step to smooth angle calculation and avoid noise
-            step = max(1, min_turn_len_px)
+            elif deg == 2:
+                prev_node, next_node = route[i-1], route[i+1]
+                x_p, y_p = G.nodes[prev_node]["x"], G.nodes[prev_node]["y"]
+                x_c, y_c = G.nodes[node]["x"], G.nodes[node]["y"]
+                x_n, y_n = G.nodes[next_node]["x"], G.nodes[next_node]["y"]
 
-            if len(pixel_path) > 2 * step:
-                last_turn_idx = -step # Index of the last turn to prevent double counting
-                
-                for j in range(step, len(pixel_path) - step):
-                    # Ensure we are far enough from the last detected turn
-                    if j < last_turn_idx + step:
-                        continue
+                in_len = G.edges[prev_node, node].get("weight", 1.0)
+                out_len = G.edges[node, next_node].get("weight", 1.0)
 
-                    y_prev, x_prev = pixel_path[j-step]
-                    y_curr, x_curr = pixel_path[j]
-                    y_next, x_next = pixel_path[j+step]
-
-                    vec1 = (x_curr - x_prev, y_curr - y_prev)
-                    vec2 = (x_next - x_curr, y_next - y_curr)
-                    angle = _angle_between(vec1, vec2)
-
-                    if angle >= angle_thresh_deg:
-                        last_turn_idx = j # Record index of this turn
-                        
+                if in_len >= min_turn_len_px and out_len >= min_turn_len_px:
+                    v1 = (x_c - x_p, y_c - y_p)
+                    v2 = (x_n - x_c, y_n - y_c)
+                    ang = _angle_between(v1, v2)
+                    if ang >= angle_thresh_deg:
                         N_ij = 2
-                        P_ij = 0.5
+                        P_ij = 1.0 / N_ij
                         E_ij = 0.5
-                        
                         P_MF *= P_ij
                         E_M += E_ij
                         turns_count += 1
-                        decision_points.append({"node_coords": (x_curr, y_curr), "type": f"turn({angle:.1f} deg)", "N_ij": N_ij})
+                        decision_points.append({"node": node, "type": f"turn({ang:.1f} deg)", "N_ij": N_ij})
 
         AQ_S += w * P_MF
         AQ_F += w * (1.0 / (1.0 + E_M))
 
         route_results.append({
             "route_id": r_idx, "P_MF": P_MF, "E_M": E_M,
-            "decision_points": decision_points, "turns": turns_count, "length": route_len_px
+            "decision_points": decision_points, "turns": turns_count, "length": route_len
         })
 
     return {"AQ_S": AQ_S, "AQ_F": AQ_F, "routes": route_results}
@@ -258,10 +246,11 @@ def extract_routes(G: nx.Graph, max_routes=5, overlap_thresh=0.7):
     if G.number_of_nodes() < 2: return [], []
 
     endpoints = [n for n, d in G.degree() if d == 1]
-    if len(endpoints) < 2: endpoints = list(G.nodes)
+    if len(endpoints) < 2: endpoints = list(G.nodes) # Fallback for circular graphs
     if len(endpoints) < 2: return [], []
     
     routes = []
+    # Using a non-fixed seed for random route selection on each run
     rng = np.random.default_rng()
     sampled = rng.choice(endpoints, size=min(len(endpoints), max_routes * 2), replace=False)
 
