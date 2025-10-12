@@ -1,168 +1,97 @@
-import cv2
-import numpy as np
-import networkx as nx
-import math
-
-# ----------------------------
-# Utility functions
-# ----------------------------
-
-def preprocess_image(img_path, px_per_meter=50):
+# ================================================================
+# 7. Faster route extraction (no all-pairs)
+# ================================================================
+def extract_routes(G: nx.Graph, max_routes=5, overlap_thresh=0.7):
     """
-    Load image, convert to grayscale, binarize, and extract skeleton.
-    Returns the skeleton image and binary mask.
+    Extract diverse routes using endpoint sampling + Dijkstra 
+    (much faster than all-pairs).
     """
-    img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        raise ValueError(f"Failed to read image: {img_path}")
+    if G.number_of_nodes() == 0:
+        return [], []
 
-    # Threshold and invert (so paths = 1)
-    _, binary = cv2.threshold(img, 200, 255, cv2.THRESH_BINARY_INV)
-    binary = binary.astype(np.uint8)
+    # Collect endpoints (degree==1)
+    endpoints = [n for n, d in G.degree() if d == 1]
+    if len(endpoints) < 2:
+        return [], []
 
-    # Morphological thinning (skeletonization)
-    skeleton = cv2.ximgproc.thinning(binary)
-
-    return skeleton, binary
-
-
-def skeleton_to_graph(skeleton):
-    """
-    Convert a skeletonized image into a graph structure.
-    Each pixel in the skeleton is a node; edges connect neighboring pixels.
-    """
-    G = nx.Graph()
-    h, w = skeleton.shape
-    skel_points = np.argwhere(skeleton > 0)
-
-    for y, x in skel_points:
-        G.add_node((x, y), x=x, y=y)
-        for dx, dy in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(1,-1),(-1,1),(1,1)]:
-            nx_, ny_ = x+dx, y+dy
-            if 0 <= nx_ < w and 0 <= ny_ < h and skeleton[ny_, nx_] > 0:
-                G.add_edge((x,y), (nx_,ny_), weight=math.hypot(dx, dy))
-    return G
-
-
-def extract_routes(G, max_routes=5):
-    """
-    Extract simple routes by finding longest paths from endpoints.
-    """
-    endpoints = [n for n in G.nodes if G.degree[n] == 1]
     routes = []
-    weights = []
-    visited = set()
+    rng = np.random.default_rng(42)  # reproducible randomness
+    sampled = rng.choice(endpoints, size=min(len(endpoints), max_routes*2), replace=False)
 
-    for start in endpoints:
-        for end in endpoints:
-            if start == end:
-                continue
-            try:
-                path = nx.shortest_path(G, start, end, weight="weight")
-                w = sum(G[u][v]["weight"] for u, v in zip(path[:-1], path[1:]))
-                if tuple(path) not in visited:
-                    routes.append(path)
-                    weights.append(w)
-                    visited.add(tuple(path))
-            except Exception:
-                pass
+    for u in sampled:
+        # Find farthest node from u
+        lengths, paths = nx.single_source_dijkstra(G, u, weight="weight")
+        if not lengths:
+            continue
+        v = max(lengths, key=lengths.get)
+        path = paths[v]
 
-    # Sort by route length
-    sorted_idx = np.argsort(weights)[::-1]
-    routes = [routes[i] for i in sorted_idx[:max_routes]]
-    weights = [weights[i] for i in sorted_idx[:max_routes]]
+        # Check overlap with existing routes
+        edgeset = set(zip(path[:-1], path[1:]))
+        overlap = max(
+            len(edgeset & set(zip(r[:-1], r[1:]))) / max(len(edgeset), 1)
+            for r in routes
+        ) if routes else 0.0
+
+        if overlap < overlap_thresh:
+            routes.append(path)
+        if len(routes) >= max_routes:
+            break
+
+    weights = [1.0 / len(routes)] * len(routes) if routes else []
     return routes, weights
 
 
-# ----------------------------
-# Turn detection (new logic)
-# ----------------------------
-
-def detect_turns(route, G, angle_thresh_deg=30, min_turn_len_px=3):
+# ================================================================
+# 8. Plot + Table Output (with AQ summary)
+# ================================================================
+def plot_routes_with_table(input_path: str, G: nx.Graph, routes: list, results: dict, skeleton=None):
     """
-    Detect turns based on local direction change along the route.
-    Returns number of turns detected.
+    Plot routes on floorplan/skeleton and show table of P_MF, E_M, Length,
+    plus a summary row with AQ_S and AQ_F.
     """
-    if len(route) < 3:
-        return 0
+    import matplotlib.cm as cm
 
-    coords = np.array([[G.nodes[n]['x'], G.nodes[n]['y']] for n in route])
-    turns = 0
+    if skeleton is None:
+        img = load_image_any(input_path)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    else:
+        img = cv2.cvtColor((skeleton * 255).astype("uint8"), cv2.COLOR_GRAY2RGB)
 
-    for i in range(1, len(coords)-1):
-        v1 = coords[i] - coords[i-1]
-        v2 = coords[i+1] - coords[i]
-        len1 = np.linalg.norm(v1)
-        len2 = np.linalg.norm(v2)
-        if len1 < min_turn_len_px or len2 < min_turn_len_px:
-            continue
+    # --- Plot ---
+    plt.figure(figsize=(10, 10))
+    plt.imshow(img)
 
-        cos_angle = np.dot(v1, v2) / (len1 * len2)
-        cos_angle = np.clip(cos_angle, -1, 1)
-        angle = math.degrees(math.acos(cos_angle))
+    colors = cm.get_cmap("tab10", len(routes))
+    for idx, route in enumerate(routes):
+        xs = [G.nodes[n]["x"] for n in route]
+        ys = [G.nodes[n]["y"] for n in route]
+        plt.plot(xs, ys, color=colors(idx), linewidth=2, label=f"Route {idx+1}")
+        plt.scatter(xs[0], ys[0], c="green", s=60, marker="o")  # start
+        plt.scatter(xs[-1], ys[-1], c="red", s=60, marker="x")  # end
 
-        if angle > angle_thresh_deg:
-            turns += 1
+    plt.legend()
+    plt.title("Extracted Routes on Floorplan")
+    plt.axis("off")
+    plt.show()
 
-    return turns
-
-
-# ----------------------------
-# Access Quotient computation
-# ----------------------------
-
-def compute_access_quotient(G, routes, weights, min_branch_len=10, angle_thresh_deg=30, min_turn_len_px=3):
-    """
-    Compute AQ metrics for all routes.
-    """
-    results = {
-        "AQ_S": 0,
-        "AQ_F": 0,
-        "routes": []
-    }
-
-    total_weight = sum(weights) if weights else 1e-9
-    aq_sum = 0
-    for ridx, route in enumerate(routes):
-        turns = detect_turns(route, G, angle_thresh_deg, min_turn_len_px)
-        length = weights[ridx]
-        if length < min_branch_len:
-            continue
-        P_MF = length / total_weight
-        E_M = 1 / (1 + turns)  # efficiency metric inversely proportional to turns
-        aq_sum += P_MF * E_M
-
-        results["routes"].append({
-            "route_id": ridx,
-            "P_MF": P_MF,
-            "E_M": E_M,
-            "turns": turns,
-            "length": length
+    # --- Table of metrics ---
+    rows = []
+    for r in results["routes"]:
+        rows.append({
+            "Route": r["route_id"] + 1,
+            "P_MF": round(r["P_MF"], 4),
+            "E_M": round(r["E_M"], 2),
+            "Length": len(routes[r["route_id"]])
         })
 
-    # Aggregate AQ metrics
-    results["AQ_S"] = aq_sum
-    results["AQ_F"] = aq_sum / len(routes) if len(routes) > 0 else 0
+    # Add summary row
+    rows.append({
+        "Route": "SUMMARY",
+        "P_MF": f"AQ_S={round(results['AQ_S'],4)}",
+        "E_M": f"AQ_F={round(results['AQ_F'],4)}",
+        "Length": "-"
+    })
 
-    return results
-
-
-# ----------------------------
-# Main pipeline
-# ----------------------------
-
-def run_aq_pipeline(img_path, px_per_meter=50, return_skeleton=False):
-    """
-    Full AQ pipeline: preprocessing → skeleton → graph → compute metrics.
-    """
-    skel, binary = preprocess_image(img_path, px_per_meter)
-    G = skeleton_to_graph(skel)
-    metrics = {
-        "num_nodes": len(G.nodes),
-        "num_edges": len(G.edges),
-    }
-
-    if return_skeleton:
-        return metrics, G, skel
-    else:
-        return metrics, G, None
+    df = pd.DataFrame(rows)
+    display(df)
