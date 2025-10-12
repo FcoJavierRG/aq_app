@@ -47,24 +47,35 @@ if uploaded_files:
             st.error(f"Failed on {uploaded.name}: {e}")
             continue
 
-     # Merge graphs (link floors automatically)
-    if len(floor_graphs) == 1:
-        G_total = floor_graphs[0]["G"]
-    else:
-        G_total = nx.compose_all([fg["G"] for fg in floor_graphs])
+     # ============================================
+# Merge graphs and create multi-floor links
+# ============================================
+if len(floor_graphs) == 1:
+    G_total = floor_graphs[0]["G"]
+else:
+    G_total = nx.compose_all([fg["G"] for fg in floor_graphs])
 
-        # ---- Improved: connect all vertically aligned nodes ----
-        max_xy_distance = 40  # adjust this threshold depending on your floor alignment
-        for i in range(len(floor_graphs) - 1):
-            G1, G2 = floor_graphs[i]["G"], floor_graphs[i + 1]["G"]
+    # Smarter vertical linking: find nodes roughly above each other
+    max_xy_distance = 40  # pixel threshold for vertical alignment
+    vertical_links = 0
 
-            for n1, n2 in [(n1, n2) for n1 in G1.nodes for n2 in G2.nodes]:
-                x1, y1 = G1.nodes[n1]["x"], G1.nodes[n1]["y"]
-                x2, y2 = G2.nodes[n2]["x"], G2.nodes[n2]["y"]
-                dist = ((x1 - x2) ** 2 + (y1 - y2) ** 2) ** 0.5
+    for i in range(len(floor_graphs) - 1):
+        G1, G2 = floor_graphs[i]["G"], floor_graphs[i + 1]["G"]
 
-                if dist < max_xy_distance:  # roughly aligned vertically
-                    G_total.add_edge(n1, n2, weight=dist, type="vertical")
+        coords1 = np.array([[G1.nodes[n]["x"], G1.nodes[n]["y"]] for n in G1])
+        coords2 = np.array([[G2.nodes[n]["x"], G2.nodes[n]["y"]] for n in G2])
+
+        for n1 in G1.nodes:
+            x1, y1 = G1.nodes[n1]["x"], G1.nodes[n1]["y"]
+            # find nearest node in next floor
+            nearest = min(G2.nodes, key=lambda n2: (G2.nodes[n2]["x"] - x1) ** 2 + (G2.nodes[n2]["y"] - y1) ** 2)
+            x2, y2 = G2.nodes[nearest]["x"], G2.nodes[nearest]["y"]
+            dist = ((x1 - x2) ** 2 + (y1 - y2) ** 2) ** 0.5
+            if dist < max_xy_distance:
+                G_total.add_edge(n1, nearest, weight=dist, type="vertical")
+                vertical_links += 1
+
+    st.info(f"🔗 Created {vertical_links} vertical inter-floor links.")
 
     routes, weights = extract_routes(G_total, max_routes=max_routes)
     results = compute_access_quotient(
