@@ -46,7 +46,6 @@ if routes:
             "Route": r["route_id"] + 1,
             "P_MF (Mistake-Free Prob.)": r["P_MF"],
             "E_M (Expected Mistakes)": r["E_M"],
-            "Turns": r.get("turns", 0),
             "Junctions": sum(1 for dp in r['decision_points'] if dp['type'] == 'junction'),
             "Length (px)": int(r.get("length", 0))
         }
