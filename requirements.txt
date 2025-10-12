@@ -12,3 +12,4 @@ scipy
 protobuf<5
 ipython
 plotly>=5.0.0
+streamlit-plotly-events
