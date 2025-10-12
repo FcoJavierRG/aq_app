@@ -1,13 +1,22 @@
-import os
-import math
-import json
-import cv2
-import fitz
+"""
+AQ Tool (Jupyter version) with AccessQuotient support
+
+Inputs: PDF (single page) or raster image (PNG/JPG)
+Outputs:
+  - metrics dict
+  - networkx graph of routes
+  - skeleton mask (numpy array)
+"""
+
+import os, math, json, cv2, fitz
 import numpy as np
+import matplotlib.pyplot as plt
 import networkx as nx
+import pandas as pd
 from dataclasses import dataclass
 from typing import Tuple, Dict, Any, List
 from skimage.morphology import skeletonize, remove_small_holes, remove_small_objects
+
 
 # ================================================================
 # 1. Preprocessing configs
@@ -107,7 +116,7 @@ def skeleton_to_graph(skel: np.ndarray, gcfg: GraphConfig) -> nx.Graph:
     G = nx.Graph()
     point_to_node = {}
     for idx, (y, x) in enumerate(keypoints):
-        G.add_node(idx, y=float(y), x=float(x), pos=(y,x))
+        G.add_node(idx, y=float(y), x=float(x))
         point_to_node[(y, x)] = idx
 
     visited = set()
@@ -139,72 +148,71 @@ def skeleton_to_graph(skel: np.ndarray, gcfg: GraphConfig) -> nx.Graph:
 
     return G
 
-# ================================================================
-# 4. AccessQuotient computation - CORRECTED
-# ================================================================
-def _rdp(points, epsilon):
-    """Ramer-Douglas-Peucker algorithm for path simplification."""
-    if not points:
-        return []
-    dmax = 0.0
-    index = 0
-    for i in range(1, len(points) - 1):
-        d = _perpendicular_distance(points[i], points[0], points[-1])
-        if d > dmax:
-            index = i
-            dmax = d
-    if dmax > epsilon:
-        rec_results1 = _rdp(points[:index + 1], epsilon)
-        rec_results2 = _rdp(points[index:], epsilon)
-        return rec_results1[:-1] + rec_results2
-    else:
-        return [points[0], points[-1]]
 
-def _perpendicular_distance(pt, line_start, line_end):
-    """Calculates the perpendicular distance from a point to a line segment."""
+# ================================================================
+# 4. AccessQuotient computation
+# ================================================================
+def _get_perpendicular_distance(pt, line_start, line_end):
+    """Calculate the perpendicular distance of a point from a line segment."""
     x0, y0 = pt
     x1, y1 = line_start
     x2, y2 = line_end
-    return abs((y2 - y1) * x0 - (x2 - x1) * y0 + x2 * y1 - y2 * x1) / math.sqrt((y2 - y1)**2 + (x2 - x1)**2)
-
-def _angle_between(p1, p2, p3):
-    """Calculate angle at p2 formed by p1-p2-p3."""
-    v1 = (p1[0] - p2[0], p1[1] - p2[1])
-    v2 = (p3[0] - p2[0], p3[1] - p2[1])
-    dot = v1[0] * v2[0] + v1[1] * v2[1]
-    det = v1[0] * v2[1] - v1[1] * v2[0]
-    angle = math.degrees(math.atan2(det, dot))
-    return abs(angle)
-
-def _get_full_pixel_path(G, route):
-    """Reconstructs the full, ordered pixel path for a given route of nodes."""
-    full_path = []
-    if not route or len(route) < 2:
-        return []
     
-    # Start with the position of the first node
-    start_node_pos = G.nodes[route[0]]['pos']
-    full_path.append(start_node_pos)
+    dx, dy = x2 - x1, y2 - y1
+    mag_sq = dx*dx + dy*dy
+    if mag_sq == 0:
+        return math.hypot(x0 - x1, y0 - y1)
+    
+    u = ((x0 - x1) * dx + (y0 - y1) * dy) / mag_sq
+    
+    if u < 0:
+        ix, iy = x1, y1
+    elif u > 1:
+        ix, iy = x2, y2
+    else:
+        ix, iy = x1 + u * dx, y1 + u * dy
+        
+    return math.hypot(x0 - ix, y0 - iy)
 
-    for i in range(len(route) - 1):
-        u, v = route[i], route[i+1]
-        edge_data = G.get_edge_data(u, v)
-        if 'path' in edge_data:
-            segment = edge_data['path']
-            # Ensure the segment is in the correct order
-            if segment[0] == G.nodes[v]['pos']:
-                segment = segment[::-1]
-            # Append all points except the first (as it's the last point of the previous segment)
-            full_path.extend(segment[1:])
-    return full_path
+def _rdp(points, epsilon):
+    """Simplifies a path using the Ramer-Douglas-Peucker algorithm."""
+    if not points or len(points) < 3:
+        return points
+    
+    dmax = 0.0
+    index = 0
+    end = len(points) - 1
+
+    for i in range(1, end):
+        d = _get_perpendicular_distance(points[i], points[0], points[end])
+        if d > dmax:
+            index = i
+            dmax = d
+
+    if dmax > epsilon:
+        rec_results1 = _rdp(points[:index+1], epsilon)
+        rec_results2 = _rdp(points[index:], epsilon)
+        return rec_results1[:-1] + rec_results2
+    else:
+        return [points[0], points[end]]
+
+def _angle_between(a, b):
+    # a, b are 2D vectors
+    da = math.hypot(a[0], a[1])
+    db = math.hypot(b[0], b[1])
+    if da == 0 or db == 0:
+        return 0.0
+    cosv = (a[0]*b[0] + a[1]*b[1]) / (da * db)
+    cosv = max(-1.0, min(1.0, cosv))
+    return math.degrees(math.acos(cosv))
 
 def compute_access_quotient(G, routes, weights,
                             min_branch_len=10,
                             angle_thresh_deg=30.0,
-                            min_turn_len_px=5):
+                            min_turn_len_px=3):
     """
     Compute AccessQuotient metrics (Strict and Flexible).
-    - CORRECTED: Reliably detects turns in corridors.
+    - Uses RDP algorithm to simplify paths and robustly detect turns.
     - Filters out tiny branches from junctions.
     """
     if not routes:
@@ -218,12 +226,14 @@ def compute_access_quotient(G, routes, weights,
     for r_idx, (route, w) in enumerate(zip(routes, weights)):
         P_MF = 1.0
         E_M = 0.0
-        junctions_count = 0
+        decision_points = []
         turns_count = 0
         
-        # --- 1. Calculate complexity from JUNCTIONS ---
-        internal_nodes = route[1:-1]
-        for node in internal_nodes:
+        route_len = sum(G.edges[u,v].get("weight",1.0) for u,v in zip(route[:-1], route[1:]))
+
+        # 1. Process JUNCTIONS (nodes with degree >= 3)
+        for i in range(1, len(route) - 1):
+            node = route[i]
             if G.degree[node] >= 3:
                 valid_branches = sum(
                     1 for nbr in G.neighbors(node) 
@@ -231,34 +241,58 @@ def compute_access_quotient(G, routes, weights,
                 )
                 if valid_branches >= 2:
                     N_ij = valid_branches
-                    P_MF *= (1.0 / N_ij)
-                    E_M += (N_ij + 1) / 2.0 - 1.0
-                    junctions_count += 1
-        
-        # --- 2. Calculate complexity from TURNS (Geometric Analysis) ---
-        pixel_path = _get_full_pixel_path(G, route)
-        if len(pixel_path) > 2:
-            # Simplify the path to find the critical corners
-            simplified_path = _rdp(pixel_path, epsilon=min_turn_len_px)
-            
-            # Calculate angle at each corner of the simplified path
-            for i in range(1, len(simplified_path) - 1):
-                angle = _angle_between(simplified_path[i-1], simplified_path[i], simplified_path[i+1])
-                if angle > angle_thresh_deg:
-                    # Treat each significant turn as a binary decision
-                    N_ij = 2
-                    P_MF *= (1.0 / N_ij)
-                    E_M += 0.5  # (2+1)/2 - 1 = 0.5
-                    turns_count += 1
+                    P_ij = 1.0 / N_ij
+                    E_ij = (N_ij + 1) / 2.0 - 1.0
+                    P_MF *= P_ij
+                    E_M += E_ij
+                    decision_points.append({"node": node, "type": "junction", "N_ij": N_ij})
 
+        # 2. Process TURNS using geometric analysis of the full pixel path
+        full_pixel_path = []
+        if len(route) > 1:
+            # Correctly stitch together the full pixel path for the route
+            for i in range(len(route) - 1):
+                u, v = route[i], route[i+1]
+                if not G.has_edge(u, v): continue
+                
+                segment = G.edges[u,v].get('path', [])
+                if not segment: continue
+                
+                # Orient the segment to follow the route's direction
+                if not full_pixel_path or full_pixel_path[-1] == segment[0]:
+                    full_pixel_path.extend(segment if not full_pixel_path else segment[1:])
+                elif full_pixel_path[-1] == segment[-1]:
+                    full_pixel_path.extend(list(reversed(segment))[1:])
+
+        if len(full_pixel_path) > 2:
+            # RDP works on (x,y) points, not the (y,x) from numpy arrays
+            xy_path = [(p[1], p[0]) for p in full_pixel_path]
+            
+            # Use min_turn_len_px as the epsilon for path simplification
+            simplified_path = _rdp(xy_path, epsilon=min_turn_len_px)
+
+            if len(simplified_path) > 2:
+                for j in range(1, len(simplified_path) - 1):
+                    x_prev, y_prev = simplified_path[j-1]
+                    x_curr, y_curr = simplified_path[j]
+                    x_next, y_next = simplified_path[j+1]
+
+                    vec1 = (x_curr - x_prev, y_curr - y_prev)
+                    vec2 = (x_next - x_curr, y_next - y_curr)
+                    angle = _angle_between(vec1, vec2)
+
+                    if angle >= angle_thresh_deg:
+                        P_MF *= 0.5
+                        E_M += 0.5
+                        turns_count += 1
+                        decision_points.append({"node_coords": (x_curr, y_curr), "type": f"turn({angle:.1f} deg)", "N_ij": 2})
+        
         AQ_S += w * P_MF
         AQ_F += w * (1.0 / (1.0 + E_M))
-        
-        route_len = sum(G.edges[u,v].get("weight",1.0) for u,v in zip(route[:-1], route[1:]))
 
         route_results.append({
             "route_id": r_idx, "P_MF": P_MF, "E_M": E_M,
-            "junctions": junctions_count, "turns": turns_count, "length": route_len
+            "decision_points": decision_points, "turns": turns_count, "length": route_len
         })
 
     return {"AQ_S": AQ_S, "AQ_F": AQ_F, "routes": route_results}
@@ -278,25 +312,15 @@ def extract_routes(G: nx.Graph, max_routes=5, overlap_thresh=0.7):
     routes = []
     # Using a non-fixed seed for random route selection on each run
     rng = np.random.default_rng()
-    sampled = rng.choice(endpoints, size=min(len(endpoints), max_routes * 4), replace=False)
+    sampled = rng.choice(endpoints, size=min(len(endpoints), max_routes * 2), replace=False)
 
     for u in sampled:
         lengths, paths = nx.single_source_dijkstra(G, u, weight="weight")
         if not lengths: continue
-        
-        # Find a distant node, preferably an endpoint
-        distant_nodes = sorted(lengths.keys(), key=lambda k: lengths[k], reverse=True)
-        v = distant_nodes[0]
-        for node in distant_nodes:
-            if node in endpoints and node != u:
-                v = node
-                break
-        
+        v = max(lengths, key=lengths.get)
         path = paths[v]
 
         edgeset = set(map(frozenset, zip(path[:-1], path[1:])))
-        if not edgeset: continue
-        
         overlap = max([len(edgeset & r_set) / len(edgeset) for _, r_set in routes] if routes else [0.0])
         
         if overlap < overlap_thresh:
@@ -307,8 +331,9 @@ def extract_routes(G: nx.Graph, max_routes=5, overlap_thresh=0.7):
     weights = [1.0 / len(final_routes)] * len(final_routes) if final_routes else []
     return final_routes, weights
 
+
 # ================================================================
-# 6. Pipeline runner and helpers
+# 6. Pipeline runner
 # ================================================================
 def run_aq_pipeline(input_path: str, px_per_meter=50.0, return_skeleton=False):
     """Full pipeline from image to graph and metrics."""
@@ -323,38 +348,27 @@ def run_aq_pipeline(input_path: str, px_per_meter=50.0, return_skeleton=False):
         return G, skel
     return G
 
-def find_closest_node(G, x, y):
-    """Finds the graph node closest to a given (x, y) coordinate."""
-    min_dist = float('inf')
-    closest_node = -1
-    for n, data in G.nodes(data=True):
-        dist = math.hypot(data['x'] - x, data['y'] - y)
-        if dist < min_dist:
-            min_dist = dist
-            closest_node = n
-    return closest_node
-
-def plot_graph_with_labels(G, skel):
-    """
-    Generates a plot of the skeleton with graph nodes and their labels,
-    which is used for manual route selection.
-    """
-    fig, ax = plt.subplots(figsize=(12, 12))
+# ================================================================
+# 7. Plotting helpers
+# ================================================================
+def plot_graph_with_labels(skel, G, title=""):
+    """Plots the skeleton graph with nodes labeled by their ID."""
+    fig, ax = plt.subplots(figsize=(10,10))
+    ax.imshow(skel, cmap="gray")
     
-    # Display the skeleton image as the background
-    img_rgb = cv2.cvtColor((skel * 255).astype(np.uint8), cv2.COLOR_GRAY2RGB)
-    ax.imshow(img_rgb)
-
-    # Get node positions for plotting. NetworkX expects (x, y) coordinates.
-    # The graph stores 'x' as column and 'y' as row, which is the correct mapping.
-    pos = {n: (data['x'], data['y']) for n, data in G.nodes(data=True)}
+    pos = {n: (d['x'], d['y']) for n, d in G.nodes(data=True)}
     
-    # Draw the graph nodes on the plot
-    nx.draw_networkx_nodes(G, pos, ax=ax, node_size=40, node_color='red', alpha=0.9)
+    # Draw nodes
+    nx.draw_networkx_nodes(G, pos, ax=ax, node_size=20, node_color='red')
     
-    # Draw the node labels (IDs) so the user can select them
-    nx.draw_networkx_labels(G, pos, ax=ax, font_size=7, font_color='cyan', font_weight='bold')
+    # Draw edges
+    nx.draw_networkx_edges(G, pos, ax=ax, edge_color='cyan')
     
+    # Draw labels
+    nx.draw_networkx_labels(G, pos, ax=ax, font_size=8, font_color='yellow',
+                            bbox=dict(facecolor='red', alpha=0.5, pad=0))
+    
+    ax.set_title(title)
     ax.axis("off")
-    plt.tight_layout()
     return fig
+
