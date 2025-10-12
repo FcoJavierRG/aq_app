@@ -1,24 +1,25 @@
-# pages/3_About_and_Help.py
 import streamlit as st
 
-st.title("About AccessQuotient Tool")
+st.title("ℹ️ About and Help")
 
 st.markdown("""
-### What is AccessQuotient (AQ)?
-AccessQuotient quantifies **spatial accessibility** within a building layout.  
-It considers:
-- **Route simplicity** (fewer turns = higher AQ)
-- **Movement efficiency** (shorter, more direct paths)
-- **Decision complexity** (number of junctions)
+**AccessQuotient (AQ)** measures navigational accessibility and wayfinding complexity in spatial layouts.
 
-### How to use:
-1. Upload one or more floorplans (each = one floor).
-2. Let the app process connectivity and generate metrics.
-3. View results and route visualizations on the **Results** page.
+#### How it works
+1. The uploaded floorplan is preprocessed and skeletonized.
+2. A topological graph of navigable routes is built.
+3. AQ metrics (AQ_S, AQ_F) are computed using graph traversal.
 
-### Tips:
-- Use clean, high-contrast floorplan images.
-- Adjust parameters in `aq_tool.py` for precision.
-- Works best for architectural layouts with clear corridors or paths.
+#### Tips
+- Use clear, high-contrast floorplans.
+- Adjust thresholds if routes are missing or over-detected.
+- Results can be exported as CSV or JSON.
+
+#### References
+This tool is based on research by spatial accessibility and network analysis methods using Python and OpenCV.
+
+---
+**Author:** You  
+**Version:** 1.0  
+**License:** MIT
 """)
-
