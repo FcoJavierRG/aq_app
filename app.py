@@ -1,22 +1,25 @@
+# app.py
 import streamlit as st
 
-st.set_page_config(
-    page_title="AccessQuotient Analyzer",
-    layout="wide"
-)
+st.set_page_config(layout="wide", page_title="Floorplan AQ Tool")
 
-st.title("AccessQuotient Multi-Floor Analyzer")
+st.title("Floorplan Accessibility (AccessQuotient) Tool")
 st.markdown("""
-Welcome to the **AccessQuotient (AQ) Analyzer** — an interactive tool for evaluating 
-**spatial accessibility** and **path efficiency** within building floorplans.
+Welcome to the **AccessQuotient (AQ) Tool**.
 
-### How it works:
-1. Upload one or more **floorplan images (JPG, PNG, or PDF)** on the **Upload & Analyze** page.  
-2. The app extracts **connectivity skeletons**, **decision points**, and **routes** automatically.  
-3. Review metrics and visualizations on the **Results** page.  
-4. Learn more about AQ and its interpretation on the **About** page.
+This app analyzes the **navigability and accessibility** of building floorplans using a skeleton-based graph approach.
 
-Use the sidebar or page tabs below to get started.
+### Features
+- **Upload** one or more floorplan images (JPG, PNG, PDF)
+- **Compute** accessibility metrics (AQ_S, AQ_F)
+- **Detect** routes and geometric turns automatically
+- **Visualize** the extracted skeleton and paths
+- **Support** for **multi-floor buildings**
+
+### Workflow
+1. Go to **Upload and Analyze** to run the pipeline.
+2. Then open **Results and Visualization** to view results.
+3. Use **About and Help** for explanations of each metric.
+
+---
 """)
-
-st.info("Go to **Upload & Analyze** to begin.")
