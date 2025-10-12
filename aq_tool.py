@@ -152,50 +152,6 @@ def skeleton_to_graph(skel: np.ndarray, gcfg: GraphConfig) -> nx.Graph:
 # ================================================================
 # 4. AccessQuotient computation
 # ================================================================
-def _get_perpendicular_distance(pt, line_start, line_end):
-    """Calculate the perpendicular distance of a point from a line segment."""
-    x0, y0 = pt
-    x1, y1 = line_start
-    x2, y2 = line_end
-    
-    dx, dy = x2 - x1, y2 - y1
-    mag_sq = dx*dx + dy*dy
-    if mag_sq == 0:
-        return math.hypot(x0 - x1, y0 - y1)
-    
-    u = ((x0 - x1) * dx + (y0 - y1) * dy) / mag_sq
-    
-    if u < 0:
-        ix, iy = x1, y1
-    elif u > 1:
-        ix, iy = x2, y2
-    else:
-        ix, iy = x1 + u * dx, y1 + u * dy
-        
-    return math.hypot(x0 - ix, y0 - iy)
-
-def _rdp(points, epsilon):
-    """Simplifies a path using the Ramer-Douglas-Peucker algorithm."""
-    if not points or len(points) < 3:
-        return points
-    
-    dmax = 0.0
-    index = 0
-    end = len(points) - 1
-
-    for i in range(1, end):
-        d = _get_perpendicular_distance(points[i], points[0], points[end])
-        if d > dmax:
-            index = i
-            dmax = d
-
-    if dmax > epsilon:
-        rec_results1 = _rdp(points[:index+1], epsilon)
-        rec_results2 = _rdp(points[index:], epsilon)
-        return rec_results1[:-1] + rec_results2
-    else:
-        return [points[0], points[end]]
-
 def _angle_between(a, b):
     # a, b are 2D vectors
     da = math.hypot(a[0], a[1])
@@ -212,7 +168,7 @@ def compute_access_quotient(G, routes, weights,
                             min_turn_len_px=3):
     """
     Compute AccessQuotient metrics (Strict and Flexible).
-    - Uses RDP algorithm to simplify paths and robustly detect turns.
+    - Treats significant turns at degree-2 nodes as decision points (N_ij=2).
     - Filters out tiny branches from junctions.
     """
     if not routes:
@@ -231,15 +187,16 @@ def compute_access_quotient(G, routes, weights,
         
         route_len = sum(G.edges[u,v].get("weight",1.0) for u,v in zip(route[:-1], route[1:]))
 
-        # 1. Process JUNCTIONS (nodes with degree >= 3)
-        # This part of the original code is correct.
-        for i in range(1, len(route) - 1):
+        for i in range(1, len(route)-1): # Iterate internal nodes
             node = route[i]
-            if G.degree[node] >= 3:
+            deg = G.degree[node]
+
+            if deg >= 3:
                 valid_branches = sum(
                     1 for nbr in G.neighbors(node) 
                     if G.edges[node, nbr].get("weight", 1.0) >= min_branch_len
                 )
+
                 if valid_branches >= 2:
                     N_ij = valid_branches
                     P_ij = 1.0 / N_ij
@@ -248,49 +205,28 @@ def compute_access_quotient(G, routes, weights,
                     E_M += E_ij
                     decision_points.append({"node": node, "type": "junction", "N_ij": N_ij})
 
-        # 2. Process TURNS using geometric analysis of the full pixel path
-        # The original code's `elif deg == 2` block was flawed because the `route`
-        # list only contains junctions, not the points in between.
-        # This new logic correctly stitches the paths together and analyzes them.
-        full_pixel_path = []
-        if len(route) > 1:
-            # Correctly stitch together the full pixel path for the route
-            for i in range(len(route) - 1):
-                u, v = route[i], route[i+1]
-                if not G.has_edge(u, v): continue
-                
-                segment = G.edges[u,v].get('path', [])
-                if not segment: continue
-                
-                # Orient the segment to follow the route's direction
-                if not full_pixel_path or full_pixel_path[-1] == segment[0]:
-                    full_pixel_path.extend(segment if not full_pixel_path else segment[1:])
-                elif full_pixel_path[-1] == segment[-1]:
-                    full_pixel_path.extend(list(reversed(segment))[1:])
+            elif deg == 2:
+                prev_node, next_node = route[i-1], route[i+1]
+                x_p, y_p = G.nodes[prev_node]["x"], G.nodes[prev_node]["y"]
+                x_c, y_c = G.nodes[node]["x"], G.nodes[node]["y"]
+                x_n, y_n = G.nodes[next_node]["x"], G.nodes[next_node]["y"]
 
-        if len(full_pixel_path) > 2:
-            # RDP works on (x,y) points, not the (y,x) from numpy arrays
-            xy_path = [(p[1], p[0]) for p in full_pixel_path]
-            
-            # Use min_turn_len_px as the epsilon for path simplification
-            simplified_path = _rdp(xy_path, epsilon=min_turn_len_px)
+                in_len = G.edges[prev_node, node].get("weight", 1.0)
+                out_len = G.edges[node, next_node].get("weight", 1.0)
 
-            if len(simplified_path) > 2:
-                for j in range(1, len(simplified_path) - 1):
-                    x_prev, y_prev = simplified_path[j-1]
-                    x_curr, y_curr = simplified_path[j]
-                    x_next, y_next = simplified_path[j+1]
-
-                    vec1 = (x_curr - x_prev, y_curr - y_prev)
-                    vec2 = (x_next - x_curr, y_next - y_curr)
-                    angle = _angle_between(vec1, vec2)
-
-                    if angle >= angle_thresh_deg:
-                        P_MF *= 0.5
-                        E_M += 0.5
+                if in_len >= min_turn_len_px and out_len >= min_turn_len_px:
+                    v1 = (x_c - x_p, y_c - y_p)
+                    v2 = (x_n - x_c, y_n - y_c)
+                    ang = _angle_between(v1, v2)
+                    if ang >= angle_thresh_deg:
+                        N_ij = 2
+                        P_ij = 1.0 / N_ij
+                        E_ij = 0.5
+                        P_MF *= P_ij
+                        E_M += E_ij
                         turns_count += 1
-                        decision_points.append({"node_coords": (x_curr, y_curr), "type": f"turn({angle:.1f} deg)", "N_ij": 2})
-        
+                        decision_points.append({"node": node, "type": f"turn({ang:.1f} deg)", "N_ij": N_ij})
+
         AQ_S += w * P_MF
         AQ_F += w * (1.0 / (1.0 + E_M))
 
