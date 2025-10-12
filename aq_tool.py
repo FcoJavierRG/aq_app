@@ -165,7 +165,7 @@ def _angle_between(a, b):
 def compute_access_quotient(G, routes, weights,
                             min_branch_len=10,
                             angle_thresh_deg=30.0,
-                            min_turn_len_px=3): # Note: min_turn_len_px is no longer used but kept for API consistency.
+                            min_turn_len_px=5):
     """
     Compute AccessQuotient metrics (Strict and Flexible).
     - Treats significant turns along paths as decision points (N_ij=2).
@@ -207,18 +207,29 @@ def compute_access_quotient(G, routes, weights,
         for i in range(len(route) - 1):
             u, v = route[i], route[i+1]
             pixel_path = G.edges[u, v].get("path", [])
+            
+            # Use min_turn_len_px as a step to smooth angle calculation and avoid noise
+            step = max(1, min_turn_len_px)
 
-            if len(pixel_path) > 2:
-                for j in range(1, len(pixel_path) - 1):
-                    y_prev, x_prev = pixel_path[j-1]
+            if len(pixel_path) > 2 * step:
+                last_turn_idx = -step # Index of the last turn to prevent double counting
+                
+                for j in range(step, len(pixel_path) - step):
+                    # Ensure we are far enough from the last detected turn
+                    if j < last_turn_idx + step:
+                        continue
+
+                    y_prev, x_prev = pixel_path[j-step]
                     y_curr, x_curr = pixel_path[j]
-                    y_next, x_next = pixel_path[j+1]
+                    y_next, x_next = pixel_path[j+step]
 
                     vec1 = (x_curr - x_prev, y_curr - y_prev)
                     vec2 = (x_next - x_curr, y_next - y_curr)
                     angle = _angle_between(vec1, vec2)
 
                     if angle >= angle_thresh_deg:
+                        last_turn_idx = j # Record index of this turn
+                        
                         N_ij = 2
                         P_ij = 0.5
                         E_ij = 0.5
