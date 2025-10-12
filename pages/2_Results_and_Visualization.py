@@ -64,26 +64,39 @@ else:
 
 # --- Visualization ---
 st.header("Route Visualization")
-st.markdown("The extracted routes are overlaid on the floorplan skeleton. Green circles mark the start of a route, and red 'X's mark the end.")
+st.markdown("The extracted routes are overlaid on your chosen background. Green circles mark the start of a route, and red 'X's mark the end.")
+
+bg_choice = st.radio(
+    "Choose visualization background:",
+    ("Floorplan Image", "Skeleton View"),
+    horizontal=True,
+    help="Select the background for the route overlay."
+)
 
 fig, ax = plt.subplots(figsize=(10, 10))
 
-# Use the robust image loader from aq_tool to handle PDFs correctly
-try:
-    img_bgr = aq_tool.load_image_any(input_path)
-    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-    ax.imshow(img_rgb, alpha=0.7)
-except Exception as e:
-    st.error(f"Could not load original image for display: {e}")
-    # Fallback to just the skeleton
+# Set background based on user's choice
+if bg_choice == "Floorplan Image":
+    try:
+        img_bgr = aq_tool.load_image_any(input_path)
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        ax.imshow(img_rgb)
+    except Exception as e:
+        st.error(f"Could not load original image for display: {e}")
+        ax.set_facecolor('white')
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+elif bg_choice == "Skeleton View":
     if skel is not None:
         ax.imshow(skel, cmap="gray")
+    else:
+        st.warning("Skeleton data not available.")
+        ax.set_facecolor('white')
+        ax.set_xticks([])
+        ax.set_yticks([])
 
-# Overlay skeleton
-if skel is not None:
-    ax.imshow(skel, cmap="gray", alpha=0.5)
-
-# Plot routes
+# Plot routes on top of the chosen background
 if routes:
     colors = plt.cm.get_cmap("tab10", len(routes))
     for idx, route in enumerate(routes):
@@ -94,6 +107,8 @@ if routes:
         ax.scatter([xs[-1]], [ys[-1]], color="red", marker="x", s=60, zorder=10)
 
 ax.axis("off")
-ax.legend()
+if routes:
+    ax.legend()
 plt.tight_layout()
 st.pyplot(fig)
+
