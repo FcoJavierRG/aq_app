@@ -116,7 +116,8 @@ def skeleton_to_graph(skel: np.ndarray, gcfg: GraphConfig) -> nx.Graph:
     G = nx.Graph()
     point_to_node = {}
     for idx, (y, x) in enumerate(keypoints):
-        G.add_node(idx, y=float(y), x=float(x))
+        # FIX: Add the 'pos' attribute for visualization compatibility
+        G.add_node(idx, y=float(y), x=float(x), pos=(y, x))
         point_to_node[(y, x)] = idx
 
     visited = set()
@@ -206,6 +207,31 @@ def _angle_between(a, b):
     cosv = max(-1.0, min(1.0, cosv))
     return math.degrees(math.acos(cosv))
 
+# FIX: Define _get_full_pixel_path as a standalone function
+def _get_full_pixel_path(G, route):
+    """Reconstructs the full, ordered pixel path for a given route of nodes."""
+    full_path = []
+    if not route or len(route) < 2:
+        return []
+    
+    # Start with the position of the first node
+    start_node_pos = (G.nodes[route[0]]['y'], G.nodes[route[0]]['x'])
+    full_path.append(start_node_pos)
+
+    for i in range(len(route) - 1):
+        u, v = route[i], route[i+1]
+        if not G.has_edge(u,v): continue
+
+        edge_data = G.get_edge_data(u, v)
+        if 'path' in edge_data:
+            segment = edge_data['path']
+            # Ensure the segment is in the correct order based on the last point added
+            if segment[0] == full_path[-1]:
+                full_path.extend(segment[1:])
+            elif segment[-1] == full_path[-1]:
+                full_path.extend(list(reversed(segment))[1:])
+    return full_path
+
 def compute_access_quotient(G, routes, weights,
                             min_branch_len=10,
                             angle_thresh_deg=30.0,
@@ -228,6 +254,7 @@ def compute_access_quotient(G, routes, weights,
         E_M = 0.0
         decision_points = []
         turns_count = 0
+        junctions_count = 0
         
         route_len = sum(G.edges[u,v].get("weight",1.0) for u,v in zip(route[:-1], route[1:]))
 
@@ -245,24 +272,11 @@ def compute_access_quotient(G, routes, weights,
                     E_ij = (N_ij + 1) / 2.0 - 1.0
                     P_MF *= P_ij
                     E_M += E_ij
+                    junctions_count += 1
                     decision_points.append({"node": node, "type": "junction", "N_ij": N_ij})
 
         # 2. Process TURNS using geometric analysis of the full pixel path
-        full_pixel_path = []
-        if len(route) > 1:
-            # Correctly stitch together the full pixel path for the route
-            for i in range(len(route) - 1):
-                u, v = route[i], route[i+1]
-                if not G.has_edge(u, v): continue
-                
-                segment = G.edges[u,v].get('path', [])
-                if not segment: continue
-                
-                # Orient the segment to follow the route's direction
-                if not full_pixel_path or full_pixel_path[-1] == segment[0]:
-                    full_pixel_path.extend(segment if not full_pixel_path else segment[1:])
-                elif full_pixel_path[-1] == segment[-1]:
-                    full_pixel_path.extend(list(reversed(segment))[1:])
+        full_pixel_path = _get_full_pixel_path(G, route)
 
         if len(full_pixel_path) > 2:
             # RDP works on (x,y) points, not the (y,x) from numpy arrays
@@ -292,7 +306,7 @@ def compute_access_quotient(G, routes, weights,
 
         route_results.append({
             "route_id": r_idx, "P_MF": P_MF, "E_M": E_M,
-            "decision_points": decision_points, "turns": turns_count, "length": route_len
+            "decision_points": decision_points, "turns": turns_count, "junctions": junctions_count, "length": route_len
         })
 
     return {"AQ_S": AQ_S, "AQ_F": AQ_F, "routes": route_results}
