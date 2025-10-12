@@ -1,8 +1,8 @@
-streamlit>=1.38.0
-opencv-python>=4.10.0
-matplotlib>=3.9.0
-networkx>=3.3
-pandas>=2.2.2
-numpy>=1.26.4
-scikit-image>=0.24.0
-pymupdf>=1.24.9
+streamlit
+opencv-python-headless
+networkx
+matplotlib
+pandas
+numpy
+scikit-image
+PyMuPDF
