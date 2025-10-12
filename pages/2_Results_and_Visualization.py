@@ -64,20 +64,20 @@ else:
 
 # --- Visualization ---
 st.header("Route Visualization")
-st.markdown("The extracted routes are overlaid on your chosen background. Green circles mark the start of a route, and red 'X's mark the end.")
+st.markdown("Select an option below to view either the floorplan image or the routes overlaid on the skeleton.")
 
 bg_choice = st.radio(
-    "Choose visualization background:",
-    ("Floorplan Image", "Skeleton View"),
+    "Choose visualization:",
+    ("Floorplan Image", "Skeleton with Routes"),
     horizontal=True,
-    help="Select the background for the route overlay."
+    help="Select the view."
 )
 
 fig, ax = plt.subplots(figsize=(10, 10))
 
-# Set background based on user's choice
+# Set view based on user's choice
 if bg_choice == "Floorplan Image":
-    st.info("Displaying routes on the original floorplan.")
+    st.info("Displaying the original floorplan.")
     try:
         img_bgr = aq_tool.load_image_any(input_path)
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
@@ -88,8 +88,9 @@ if bg_choice == "Floorplan Image":
         ax.set_xticks([])
         ax.set_yticks([])
 
-elif bg_choice == "Skeleton View":
-    st.info("Displaying routes on the computed skeleton.")
+elif bg_choice == "Skeleton with Routes":
+    st.info("Displaying routes on the computed skeleton. Green circles mark the start of a route, and red 'X's mark the end.")
+    # Set skeleton as background
     if skel is not None:
         ax.imshow(skel, cmap="gray")
     else:
@@ -98,19 +99,18 @@ elif bg_choice == "Skeleton View":
         ax.set_xticks([])
         ax.set_yticks([])
 
-# Plot routes on top of the chosen background
-if routes:
-    colors = plt.cm.get_cmap("tab10", len(routes))
-    for idx, route in enumerate(routes):
-        xs = [G.nodes[n]["x"] for n in route]
-        ys = [G.nodes[n]["y"] for n in route]
-        ax.plot(xs, ys, color=colors(idx), linewidth=2.5, label=f"Route {idx+1}")
-        ax.scatter([xs[0]], [ys[0]], color="green", marker="o", s=60, zorder=10)
-        ax.scatter([xs[-1]], [ys[-1]], color="red", marker="x", s=60, zorder=10)
+    # Plot routes ONLY on the skeleton view
+    if routes:
+        colors = plt.cm.get_cmap("tab10", len(routes))
+        for idx, route in enumerate(routes):
+            xs = [G.nodes[n]["x"] for n in route]
+            ys = [G.nodes[n]["y"] for n in route]
+            ax.plot(xs, ys, color=colors(idx), linewidth=2.5, label=f"Route {idx+1}")
+            ax.scatter([xs[0]], [ys[0]], color="green", marker="o", s=60, zorder=10)
+            ax.scatter([xs[-1]], [ys[-1]], color="red", marker="x", s=60, zorder=10)
+        ax.legend()
 
 ax.axis("off")
-if routes:
-    ax.legend()
 plt.tight_layout()
 st.pyplot(fig)
 
