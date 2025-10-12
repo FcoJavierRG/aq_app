@@ -16,7 +16,7 @@ if "aq_graph" not in st.session_state:
 # --- Helper function to display results for a given route set ---
 def display_results(results_key, routes_key, title):
     if results_key not in st.session_state or not st.session_state[results_key]:
-        st.info(f"No {title.lower()} found to display.")
+        st.info(f"No {title.lower()} found to display. Please define and analyze routes on the 'Upload and Analyze' page.")
         return
 
     results = st.session_state[results_key]
@@ -86,15 +86,17 @@ def display_results(results_key, routes_key, title):
             ax.plot(xs, ys, color=colors(idx), linewidth=2.5, label=f"Route {idx+1}")
             
             # Mark start & end points
-            ax.scatter(xs[0], ys[0], c="lime", s=80, marker="o", zorder=5, edgecolors='black', label=f"Start {idx+1}")
-            ax.scatter(xs[-1], ys[-1], c="red", s=100, marker="X", zorder=5, edgecolors='black', label=f"End {idx+1}")
+            start_node_id = route[0]
+            end_node_id = route[-1]
+            ax.scatter(xs[0], ys[0], c="lime", s=80, marker="o", zorder=5, edgecolors='black', label=f"Start (Node {start_node_id})")
+            ax.scatter(xs[-1], ys[-1], c="red", s=100, marker="X", zorder=5, edgecolors='black', label=f"End (Node {end_node_id})")
 
     ax.set_title(f"{title} on Floorplan Skeleton")
     ax.axis("off")
-    # Consolidate legend
+    # Consolidate legend to avoid duplicate labels
     handles, labels = ax.get_legend_handles_labels()
-    unique_labels = dict(zip(labels, handles))
-    ax.legend(unique_labels.values(), unique_labels.keys())
+    by_label = dict(zip(labels, handles))
+    ax.legend(by_label.values(), by_label.keys())
     
     st.pyplot(fig)
 
