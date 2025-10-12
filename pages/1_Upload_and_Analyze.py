@@ -47,20 +47,24 @@ if uploaded_files:
             st.error(f"Failed on {uploaded.name}: {e}")
             continue
 
-    # Merge graphs (link floors automatically)
+     # Merge graphs (link floors automatically)
     if len(floor_graphs) == 1:
         G_total = floor_graphs[0]["G"]
     else:
         G_total = nx.compose_all([fg["G"] for fg in floor_graphs])
-        for i in range(len(floor_graphs)-1):
-            G1, G2 = floor_graphs[i]["G"], floor_graphs[i+1]["G"]
-            x1, y1 = np.mean([G1.nodes[n]["x"] for n in G1]), np.mean([G1.nodes[n]["y"] for n in G1])
-            x2, y2 = np.mean([G2.nodes[n]["x"] for n in G2]), np.mean([G2.nodes[n]["y"] for n in G2])
 
-            def find_nearest(G, x, y):
-                return min(G.nodes, key=lambda n: (G.nodes[n]["x"]-x)**2 + (G.nodes[n]["y"]-y)**2)
-            n1, n2 = find_nearest(G1, x1, y1), find_nearest(G2, x2, y2)
-            G_total.add_edge(n1, n2, weight=3.0, type="vertical")
+        # ---- Improved: connect all vertically aligned nodes ----
+        max_xy_distance = 40  # adjust this threshold depending on your floor alignment
+        for i in range(len(floor_graphs) - 1):
+            G1, G2 = floor_graphs[i]["G"], floor_graphs[i + 1]["G"]
+
+            for n1, n2 in [(n1, n2) for n1 in G1.nodes for n2 in G2.nodes]:
+                x1, y1 = G1.nodes[n1]["x"], G1.nodes[n1]["y"]
+                x2, y2 = G2.nodes[n2]["x"], G2.nodes[n2]["y"]
+                dist = ((x1 - x2) ** 2 + (y1 - y2) ** 2) ** 0.5
+
+                if dist < max_xy_distance:  # roughly aligned vertically
+                    G_total.add_edge(n1, n2, weight=dist, type="vertical")
 
     routes, weights = extract_routes(G_total, max_routes=max_routes)
     results = compute_access_quotient(
