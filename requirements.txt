@@ -1,24 +1,25 @@
-# Core web app framework
+# --- Core framework ---
 streamlit==1.39.0
 
-# Interactive plots and 3D visualization
+# --- Interactive visualizations ---
 plotly==5.24.0
 streamlit-plotly-events==0.0.6
 
-# Image processing
+# --- Image and floorplan processing ---
 opencv-python-headless==4.10.0.84
 scikit-image==0.24.0
 
-# Graphs and network analysis
+# --- Graphs and connectivity analysis ---
 networkx==3.3
 
-# Numerical & data handling
+# --- Math, data, and visualization ---
 numpy==1.26.4
 pandas==2.2.3
+matplotlib==3.9.2
 scipy==1.13.1
 
-# Visualization support
-matplotlib==3.9.2
-
-# Utilities
+# --- Image utilities ---
 Pillow==10.4.0
+
+# --- PDF support ---
+PyMuPDF==1.24.10
