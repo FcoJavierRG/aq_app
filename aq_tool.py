@@ -228,6 +228,9 @@ def get_full_pixel_path(G, route):
                 full_path.extend(list(reversed(segment))[1:])
     return full_path
 
+# Add an alias to fix the AttributeError from the calling script
+_get_full_pixel_path = get_full_pixel_path
+
 def compute_access_quotient(G, routes, weights,
                             min_branch_len=10,
                             angle_thresh_deg=30.0,
