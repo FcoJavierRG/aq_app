@@ -248,30 +248,15 @@ def compute_access_quotient(G, routes, weights,
                     decision_points.append({"node": node, "type": "junction", "N_ij": N_ij})
 
         # 2. Process TURNS using geometric analysis of the full pixel path
-        # BUG FIX: The original path stitching logic was flawed. This new logic
-        # correctly orients each segment before appending to create a valid path.
         full_pixel_path = []
-        if route: # Ensure route is not empty
-            for i in range(len(route) - 1):
-                u, v = route[i], route[i+1]
-                if not G.has_edge(u, v): continue
-
-                segment_path = G.edges[u, v].get("path", [])
-                if not segment_path: continue
-
-                # Correctly orient the path segment before appending.
-                u_coords = (G.nodes[u]['y'], G.nodes[u]['x'])
-                
-                if segment_path[0] == u_coords:
-                    oriented_segment = segment_path
-                else:
-                    oriented_segment = list(reversed(segment_path))
-
-                # Append the segment, avoiding duplicate points between segments
-                if not full_pixel_path:
-                    full_pixel_path.extend(oriented_segment)
-                else:
-                    full_pixel_path.extend(oriented_segment[1:])
+        for i in range(len(route) - 1):
+            u, v = route[i], route[i+1]
+            segment_path = G.edges[u, v].get("path", [])
+            # Ensure correct path direction and avoid duplicating connection points
+            if full_pixel_path and full_pixel_path[-1] == segment_path[0]:
+                full_pixel_path.extend(segment_path[1:])
+            else:
+                 full_pixel_path.extend(segment_path)
         
         if len(full_pixel_path) > 2:
             # RDP works on (x,y) points, not (y,x)
