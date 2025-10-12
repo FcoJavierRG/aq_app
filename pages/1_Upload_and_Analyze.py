@@ -50,86 +50,65 @@ if uploaded:
     st.session_state["input_path"] = fpath
     st.session_state["auto_results"] = auto_results
     st.session_state["auto_routes"] = auto_routes
-    # Initialize the list for custom route definitions (start, end)
-    if "custom_route_definitions" not in st.session_state:
-        st.session_state["custom_route_definitions"] = []
+    if "custom_routes" not in st.session_state:
+        st.session_state["custom_routes"] = []
 
-
-    st.success("Initial analysis complete. You can now define a list of custom routes below.")
+    st.success("Initial analysis complete. You can now select routes manually below.")
 
     # --- 3. MANUAL ROUTE SELECTION UI ---
     with st.expander("Manual Route Selection", expanded=True):
-        st.markdown("Use the controls to build a list of custom routes (e.g., Route 1: 5 -> 23, Route 2: 10 -> 45). Then, click the analyze button.")
+        st.markdown("Select start and end nodes from the graph to define a custom route. The labeled nodes are shown on the map below.")
         
         col1, col2 = st.columns(2)
         with col1:
-            st.write("### Define a Route")
+            st.write("### Route Definition")
             if G.number_of_nodes() > 0:
                 node_list = sorted(list(G.nodes()))
                 start_node = st.selectbox("Select Start Node", node_list)
                 end_node = st.selectbox("Select End Node", node_list, index=min(1, len(node_list)-1))
 
-                if st.button("➕ Add Route to List"):
+                if st.button("➕ Add Route"):
                     if start_node == end_node:
                         st.warning("Start and end nodes cannot be the same.")
                     else:
-                        # Add the (start, end) tuple to our definitions list
-                        st.session_state.custom_route_definitions.append((start_node, end_node))
-                        st.rerun()
+                        try:
+                            path = nx.dijkstra_path(G, source=start_node, target=end_node, weight='weight')
+                            st.session_state.custom_routes.append(path)
+                            st.rerun()
+                        except nx.NetworkXNoPath:
+                            st.error(f"No path could be found between node {start_node} and {end_node}.")
             else:
                 st.warning("No nodes found in graph. Cannot select a route.")
 
-            # --- Display and manage custom routes list ---
-            st.write("### Custom Route List")
-            if not st.session_state.custom_route_definitions:
-                st.caption("No custom routes defined yet.")
+            # --- Display and manage custom routes ---
+            st.write("### Current Custom Routes")
+            if not st.session_state.custom_routes:
+                st.caption("No custom routes added yet.")
             else:
-                for i, (start, end) in enumerate(st.session_state.custom_route_definitions):
-                    st.text(f"Route {i+1}: Node {start} -> Node {end}")
-                
-                if st.button("🗑️ Clear Route List"):
-                    st.session_state.custom_route_definitions = []
-                    # Also clear previous results if they exist
-                    if 'custom_results' in st.session_state:
-                        del st.session_state['custom_results']
-                    if 'custom_routes' in st.session_state:
-                        del st.session_state['custom_routes']
+                for i, r in enumerate(st.session_state.custom_routes):
+                    st.text(f"Route {i+1}: {' -> '.join(map(str, r))}")
+                if st.button("🗑️ Clear All Custom Routes"):
+                    st.session_state.custom_routes = []
                     st.rerun()
             
-            # --- Analyze the entire list of custom routes ---
-            if st.session_state.custom_route_definitions:
-                if st.button("Analyze Full Custom Route List", type="primary"):
-                    custom_routes = []
-                    valid_definitions = []
-                    with st.spinner("Calculating paths for custom routes..."):
-                        for start, end in st.session_state.custom_route_definitions:
-                            try:
-                                path = nx.dijkstra_path(G, source=start, target=end, weight='weight')
-                                custom_routes.append(path)
-                                valid_definitions.append((start,end))
-                            except nx.NetworkXNoPath:
-                                st.error(f"Could not find a path for route: {start} -> {end}. It will be skipped.")
-                    
-                    if custom_routes:
-                        st.session_state['custom_routes'] = custom_routes
-                        st.session_state['custom_route_definitions'] = valid_definitions # Update list to only valid ones
-                        
-                        custom_weights = [1.0 / len(custom_routes)] * len(custom_routes)
+            # --- Analyze custom routes ---
+            if st.session_state.custom_routes:
+                if st.button("Analyze Custom Routes", type="primary"):
+                    with st.spinner("Analyzing..."):
+                        custom_weights = [1.0 / len(st.session_state.custom_routes)] * len(st.session_state.custom_routes)
                         custom_results = compute_access_quotient(
-                            G, custom_routes, custom_weights,
+                            G, st.session_state.custom_routes, custom_weights,
                             min_branch_len=min_branch_len,
                             angle_thresh_deg=angle_thresh_deg,
                             min_turn_len_px=min_turn_len_px
                         )
                         st.session_state['custom_results'] = custom_results
-                        st.success("Analysis of custom routes is complete! Go to the **Results** page to view.")
-                    else:
-                        st.warning("No valid paths were found for the defined routes. Analysis could not be completed.")
+                    st.success("Analysis of custom routes is complete! Go to the **Results** page to view.")
 
 
         with col2:
             st.write("### Node Map")
-            fig = plot_graph_with_labels(skel, G, title="Reference this map to select start/end nodes")
+            fig = plot_graph_with_labels(skel, G, title="Click nodes to select route start/end")
             st.pyplot(fig)
 else:
     st.warning("Upload a floorplan to begin analysis.")
