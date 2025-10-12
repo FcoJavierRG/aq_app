@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import cv2
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import networkx as nx
