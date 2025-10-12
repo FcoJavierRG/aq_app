@@ -334,3 +334,27 @@ def find_closest_node(G, x, y):
             closest_node = n
     return closest_node
 
+def plot_graph_with_labels(G, skel):
+    """
+    Generates a plot of the skeleton with graph nodes and their labels,
+    which is used for manual route selection.
+    """
+    fig, ax = plt.subplots(figsize=(12, 12))
+    
+    # Display the skeleton image as the background
+    img_rgb = cv2.cvtColor((skel * 255).astype(np.uint8), cv2.COLOR_GRAY2RGB)
+    ax.imshow(img_rgb)
+
+    # Get node positions for plotting. NetworkX expects (x, y) coordinates.
+    # The graph stores 'x' as column and 'y' as row, which is the correct mapping.
+    pos = {n: (data['x'], data['y']) for n, data in G.nodes(data=True)}
+    
+    # Draw the graph nodes on the plot
+    nx.draw_networkx_nodes(G, pos, ax=ax, node_size=40, node_color='red', alpha=0.9)
+    
+    # Draw the node labels (IDs) so the user can select them
+    nx.draw_networkx_labels(G, pos, ax=ax, font_size=7, font_color='cyan', font_weight='bold')
+    
+    ax.axis("off")
+    plt.tight_layout()
+    return fig
