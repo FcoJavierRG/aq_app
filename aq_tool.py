@@ -250,7 +250,8 @@ def extract_routes(G: nx.Graph, max_routes=5, overlap_thresh=0.7):
     if len(endpoints) < 2: return [], []
     
     routes = []
-    rng = np.random.default_rng(42)
+    # Using a non-fixed seed for random route selection on each run
+    rng = np.random.default_rng()
     sampled = rng.choice(endpoints, size=min(len(endpoints), max_routes * 2), replace=False)
 
     for u in sampled:
@@ -286,3 +287,4 @@ def run_aq_pipeline(input_path: str, px_per_meter=50.0, return_skeleton=False):
     if return_skeleton:
         return G, skel
     return G
+
