@@ -2,60 +2,98 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import pandas as pd
 import cv2
+import aq_tool # Import your tool to use its functions
 
-st.title("Results and Visualization")
+st.set_page_config(page_title="Results", layout="wide")
+st.title("2. Results and Visualization")
 
+# Check if results exist in the session state
 if "aq_results" not in st.session_state:
-    st.warning("No results found. Please run analysis on the **Upload and Analyze** page first.")
+    st.warning("No results found. Please run an analysis on the 'Upload and Analyze' page first.")
     st.stop()
 
+# Retrieve data from session state
 results = st.session_state["aq_results"]
 routes = st.session_state["aq_routes"]
 G = st.session_state["aq_graph"]
 skel = st.session_state["aq_skel"]
 input_path = st.session_state["input_path"]
+filename = st.session_state["filename"]
 
-st.subheader("Summary Metrics")
+st.header("Overall Accessibility Scores")
+st.markdown(f"Metrics for **{filename}**")
+
 col1, col2 = st.columns(2)
 with col1:
-    st.json({"AQ_S": results["AQ_S"], "AQ_F": results["AQ_F"], "num_routes": len(routes)})
+    aq_s = results.get('AQ_S', 0)
+    st.metric(
+        label="Strict AccessQuotient (AQ_S)",
+        value=f"{aq_s:.4f}",
+        help="Represents the weighted probability of mistake-free navigation. Higher is better."
+    )
 with col2:
-    st.write("Per-route summary:")
+    aq_f = results.get('AQ_F', 0)
+    st.metric(
+        label="Flexible AccessQuotient (AQ_F)",
+        value=f"{aq_f:.4f}",
+        help="Reflects navigability based on the expected number of mistakes. Higher is better (fewer mistakes)."
+    )
+
+st.header("Per-Route Details")
+if routes:
     df = pd.DataFrame([
-        {"Route": r["route_id"]+1, "P_MF": round(r["P_MF"],4), "E_M": round(r["E_M"],2),
-         "Turns": r.get("turns",0), "Length_px": int(r.get("length",0))}
+        {
+            "Route": r["route_id"] + 1,
+            "P_MF (Mistake-Free Prob.)": r["P_MF"],
+            "E_M (Expected Mistakes)": r["E_M"],
+            "Turns": r.get("turns", 0),
+            "Junctions": sum(1 for dp in r['decision_points'] if dp['type'] == 'junction'),
+            "Length (px)": int(r.get("length", 0))
+        }
         for r in results["routes"]
     ])
-    st.dataframe(df)
+    st.dataframe(df.style.format({
+        "P_MF (Mistake-Free Prob.)": "{:.4f}",
+        "E_M (Expected Mistakes)": "{:.2f}"
+    }))
+    
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button("Download Route Data as CSV", csv, f"routes_{filename}.csv", "text/csv")
+else:
+    st.warning("No routes could be extracted based on the current parameters.")
 
-csv = df.to_csv(index=False)
-st.download_button("Download Routes CSV", csv, "routes.csv", "text/csv")
+# --- Visualization ---
+st.header("Route Visualization")
+st.markdown("The extracted routes are overlaid on the floorplan skeleton. Green circles mark the start of a route, and red 'X's mark the end.")
 
-# Visualization
-st.subheader("Route Overlay Visualization")
-fig, ax = plt.subplots(figsize=(8,8))
+fig, ax = plt.subplots(figsize=(10, 10))
+
+# Use the robust image loader from aq_tool to handle PDFs correctly
 try:
-    if input_path.lower().endswith(".pdf"):
-        img = None
-    else:
-        img_bgr = cv2.imread(input_path)
-        img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB) if img_bgr is not None else None
-except Exception:
-    img = None
+    img_bgr = aq_tool.load_image_any(input_path)
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    ax.imshow(img_rgb, alpha=0.7)
+except Exception as e:
+    st.error(f"Could not load original image for display: {e}")
+    # Fallback to just the skeleton
+    if skel is not None:
+        ax.imshow(skel, cmap="gray")
 
-if img is not None:
-    ax.imshow(img, alpha=0.8)
+# Overlay skeleton
 if skel is not None:
-    ax.imshow(skel, cmap="gray", alpha=0.6)
+    ax.imshow(skel, cmap="gray", alpha=0.5)
 
-colors = ["cyan","lime","orange","magenta","brown","yellow","red","blue","purple","teal"]
-for idx, route in enumerate(routes):
-    xs = [G.nodes[n]["x"] for n in route]
-    ys = [G.nodes[n]["y"] for n in route]
-    ax.plot(xs, ys, color=colors[idx%len(colors)], linewidth=2, label=f"Route {idx+1}")
-    ax.scatter([xs[0]],[ys[0]], color="green", marker="o", s=40)
-    ax.scatter([xs[-1]],[ys[-1]], color="red", marker="x", s=40)
+# Plot routes
+if routes:
+    colors = plt.cm.get_cmap("tab10", len(routes))
+    for idx, route in enumerate(routes):
+        xs = [G.nodes[n]["x"] for n in route]
+        ys = [G.nodes[n]["y"] for n in route]
+        ax.plot(xs, ys, color=colors(idx), linewidth=2.5, label=f"Route {idx+1}")
+        ax.scatter([xs[0]], [ys[0]], color="green", marker="o", s=60, zorder=10)
+        ax.scatter([xs[-1]], [ys[-1]], color="red", marker="x", s=60, zorder=10)
 
 ax.axis("off")
 ax.legend()
+plt.tight_layout()
 st.pyplot(fig)
